@@ -1,6 +1,0 @@
-node_modules/
-floorstock.db
-floorstock.db-journal
-floorstock.db-wal
-floorstock.db-shm
-.DS_Store
