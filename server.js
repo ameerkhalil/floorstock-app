@@ -14,7 +14,9 @@ const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 // Stripe billing config
 const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
-const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
+// Keep STRIPE_PRICE_ID as a backwards-compatible fallback for the annual plan.
+const STRIPE_MONTHLY_PRICE_ID = process.env.STRIPE_MONTHLY_PRICE_ID || '';
+const STRIPE_ANNUAL_PRICE_ID = process.env.STRIPE_ANNUAL_PRICE_ID || process.env.STRIPE_PRICE_ID || '';
 const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
@@ -385,8 +387,20 @@ app.get('/api/billing/status', requireAuth, (req, res) => {
 });
 
 app.post('/api/billing/create-checkout-session', requireManager, async (req, res) => {
-  if (!stripe || !STRIPE_PRICE_ID) {
+  if (!stripe) {
     return res.status(500).json({ error: 'Stripe billing is not configured.' });
+  }
+
+  const plan = String((req.body && req.body.plan) || '').toLowerCase();
+  if (!['monthly', 'annual'].includes(plan)) {
+    return res.status(400).json({ error: 'Choose either the monthly or annual plan.' });
+  }
+
+  const priceId = plan === 'monthly' ? STRIPE_MONTHLY_PRICE_ID : STRIPE_ANNUAL_PRICE_ID;
+  if (!priceId) {
+    return res.status(500).json({
+      error: `${plan === 'monthly' ? 'Monthly' : 'Annual'} Stripe price is not configured.`
+    });
   }
 
   try {
@@ -401,12 +415,12 @@ app.post('/api/billing/create-checkout-session', requireManager, async (req, res
 
     const sessionOptions = {
       mode: 'subscription',
-      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+      line_items: [{ price: priceId, quantity: 1 }],
       success_url: `${req.protocol}://${req.get('host')}/?checkout=success`,
       cancel_url: `${req.protocol}://${req.get('host')}/?checkout=cancelled`,
       client_reference_id: store.id,
-      metadata: { storeId: store.id },
-      subscription_data: { metadata: { storeId: store.id } },
+      metadata: { storeId: store.id, plan },
+      subscription_data: { metadata: { storeId: store.id, plan } },
     };
 
     if (store.stripe_customer_id) {
@@ -787,5 +801,5 @@ app.listen(PORT, () => {
   console.log(`FloorStock server running at http://localhost:${PORT}`);
   console.log(`Database file: ${DB_PATH}`);
   console.log(RESEND_API_KEY ? `Digest email enabled (daily at ${DIGEST_HOUR_UTC}:00 UTC)` : 'Digest email disabled (no RESEND_API_KEY set)');
-  console.log(stripe && STRIPE_PRICE_ID ? 'Stripe billing enabled' : 'Stripe billing disabled (missing STRIPE_SECRET_KEY or STRIPE_PRICE_ID)');
+  console.log(stripe && (STRIPE_MONTHLY_PRICE_ID || STRIPE_ANNUAL_PRICE_ID) ? 'Stripe billing enabled' : 'Stripe billing disabled (missing Stripe secret key or price IDs)');
 });
