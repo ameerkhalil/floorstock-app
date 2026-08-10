@@ -1,0 +1,19 @@
+{
+  "name": "floorstock",
+  "version": "1.0.0",
+  "description": "Floor stock inventory and expiration tracker with UPC scanning, backed by SQLite.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "engines": {
+    "node": "20.x"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.3.0",
+    "bcryptjs": "^2.4.3",
+    "cookie-parser": "^1.4.6",
+    "express": "^4.19.2",
+    "stripe": "^17.3.1"
+  }
+}
