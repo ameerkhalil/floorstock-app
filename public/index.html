@@ -388,6 +388,17 @@
           <select class="field-input" id="categoryInput">
             <option value="">No category</option>
           </select>
+          <div id="inlineCategoryForm" style="display:none; margin-top:8px; background:var(--surface); border-radius:7px; padding:10px;">
+            <div style="display:flex; gap:8px; align-items:center;">
+              <input id="inlineCategoryName" placeholder="Category name" style="flex:1; padding:8px 10px; border-radius:6px; border:1px solid var(--border); font-size:13px;">
+              <input id="inlineCategoryColor" type="color" value="#2D5F8A" style="width:38px; height:36px; padding:2px; border-radius:6px; border:1px solid var(--border); background:#fff; flex:0 0 auto;">
+            </div>
+            <div style="display:flex; gap:8px; margin-top:8px;">
+              <button type="button" id="inlineCategoryAddBtn" style="flex:1; background:var(--accent); color:#fff; border:none; border-radius:6px; padding:8px 0; font-weight:600; font-size:13px;">Create category</button>
+              <button type="button" id="inlineCategoryCancelBtn" style="background:none; border:none; color:var(--muted); font-size:13px; padding:8px 10px;">Cancel</button>
+            </div>
+            <div class="auth-error" id="inlineCategoryError" style="display:none; margin-top:6px; margin-bottom:0;"></div>
+          </div>
         </div>
         <div>
           <label class="field-label">Expiration date</label>
@@ -1173,9 +1184,62 @@
     const sel = document.getElementById('categoryInput');
     const current = sel.value;
     sel.innerHTML = '<option value="">No category</option>' +
-      categories.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('');
+      categories.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('') +
+      '<option value="__new__">+ New category\u2026</option>';
     if (categories.some(c => c.id === current)) sel.value = current;
   }
+
+  document.getElementById('categoryInput').addEventListener('change', (e) => {
+    if (e.target.value === '__new__') {
+      e.target.value = '';
+      document.getElementById('inlineCategoryForm').style.display = 'block';
+      document.getElementById('inlineCategoryName').focus();
+    } else {
+      document.getElementById('inlineCategoryForm').style.display = 'none';
+    }
+  });
+
+  document.getElementById('inlineCategoryCancelBtn').addEventListener('click', () => {
+    document.getElementById('inlineCategoryForm').style.display = 'none';
+    document.getElementById('inlineCategoryName').value = '';
+    document.getElementById('inlineCategoryError').style.display = 'none';
+  });
+
+  document.getElementById('inlineCategoryAddBtn').addEventListener('click', async () => {
+    const errEl = document.getElementById('inlineCategoryError');
+    const name = document.getElementById('inlineCategoryName').value.trim();
+    const color = document.getElementById('inlineCategoryColor').value;
+    if (!name) {
+      errEl.textContent = 'Enter a category name.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const btn = document.getElementById('inlineCategoryAddBtn');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Creating\u2026';
+    try {
+      const created = await apiRequest('/api/categories', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, color }),
+      });
+      categories.push(created);
+      categories.sort((a, b) => a.name.localeCompare(b.name));
+      populateCategorySelect();
+      document.getElementById('categoryInput').value = created.id;
+      document.getElementById('inlineCategoryForm').style.display = 'none';
+      document.getElementById('inlineCategoryName').value = '';
+      errEl.style.display = 'none';
+      showToast('Category created');
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+
   function setConnectionStatus(online) {
     const el = document.getElementById('connStatus');
     el.style.display = online ? 'none' : 'flex';
@@ -1429,6 +1493,8 @@
     document.getElementById('sizeValueInput').value = item && item.sizeValue !== null && item.sizeValue !== undefined ? item.sizeValue : '';
     document.getElementById('sizeUnitInput').value = item && item.sizeUnit ? item.sizeUnit : '';
     document.getElementById('sizeAutoNote').style.display = 'none';
+    document.getElementById('inlineCategoryForm').style.display = 'none';
+    document.getElementById('inlineCategoryName').value = '';
     document.getElementById('formError').style.display = 'none';
     document.getElementById('scanError').style.display = 'none';
     hideLookupNote();
