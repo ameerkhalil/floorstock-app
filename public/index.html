@@ -6,6 +6,7 @@
 <title>FloorStock — Inventory &amp; Expiration Tracking</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <style>
   :root {
     --bg: #EDEFF1;
@@ -25,69 +26,58 @@
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; padding: 0; }
-  body {
-    background: var(--bg);
-    color: var(--ink);
-    font-family: 'Inter', sans-serif;
-    min-height: 100vh;
-  }
+  body { background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; min-height: 100vh; }
   button { font-family: inherit; cursor: pointer; }
   input, select { font-family: inherit; }
-  button:focus-visible, input:focus-visible, select:focus-visible {
-    outline: 2px solid var(--accent); outline-offset: 2px;
-  }
+  button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   ::-webkit-scrollbar { width: 10px; height: 10px; }
   ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 6px; }
-  @media (prefers-reduced-motion: reduce) {
-    * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
-  }
+  @media (prefers-reduced-motion: reduce) { * { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
 
-  header {
-    background: var(--ink);
-    color: var(--bg);
-    padding: 18px 20px;
-    position: sticky;
-    top: 0;
-    z-index: 100;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
-  }
-  .header-inner {
-    max-width: 1100px; margin: 0 auto;
-    display: flex; align-items: center; justify-content: space-between;
-  }
+  /* ---------- auth screens ---------- */
+  .auth-wrap { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 24px; }
+  .auth-card { background: #fff; border-radius: 12px; padding: 32px 28px; width: 100%; max-width: 420px; box-shadow: 0 4px 24px rgba(28,37,48,0.12); border: 1px solid var(--border-light); }
+  .auth-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
+  .auth-logo-icon { width: 34px; height: 34px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .auth-logo-title { font-family: 'Oswald', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 0.5px; }
+  .auth-tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 8px; padding: 4px; margin-bottom: 20px; }
+  .auth-tab { flex: 1; border: none; background: none; padding: 8px 0; border-radius: 6px; font-weight: 600; font-size: 13.5px; color: var(--muted-2); }
+  .auth-tab.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(28,37,48,0.12); }
+  .auth-field { margin-bottom: 14px; }
+  .auth-field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted-2); margin-bottom: 5px; }
+  .auth-field input { width: 100%; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--border); font-size: 14px; }
+  .auth-error { font-size: 13px; color: var(--expired-band); font-weight: 500; margin-bottom: 12px; }
+  .auth-submit { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 12px 0; font-weight: 700; font-size: 14.5px; margin-top: 4px; }
+  .auth-submit:disabled { opacity: 0.6; }
+  .auth-hint { font-size: 12.5px; color: var(--muted); margin-top: 14px; text-align: center; line-height: 1.5; }
+  .role-note { display: flex; gap: 8px; align-items: flex-start; background: var(--surface); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; color: var(--muted-2); margin-bottom: 16px; line-height: 1.5; }
+
+  /* ---------- app shell ---------- */
+  header { background: var(--ink); color: var(--bg); padding: 18px 20px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  .header-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .brand { display: flex; align-items: center; gap: 10px; }
-  .brand-icon {
-    width: 34px; height: 34px; background: var(--accent); border-radius: 6px;
-    display: flex; align-items: center; justify-content: center; flex-shrink: 0;
-  }
+  .brand-icon { width: 34px; height: 34px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .brand-title { font-family: 'Oswald', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 0.5px; line-height: 1; }
   .brand-sub { font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-top: 2px; }
-  .btn-primary {
-    display: flex; align-items: center; gap: 6px;
-    background: var(--amber); color: var(--ink); border: none; border-radius: 6px;
-    padding: 10px 16px; font-weight: 600; font-size: 14px;
-  }
+  .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .store-pill { font-size: 12.5px; color: var(--bg); background: rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 6px; }
+  .store-pill .role-badge { background: var(--amber); color: var(--ink); font-weight: 700; font-size: 10.5px; padding: 1px 6px; border-radius: 4px; letter-spacing: 0.4px; text-transform: uppercase; }
+  .btn-ghost { background: rgba(255,255,255,0.08); color: var(--bg); border: none; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .btn-primary { display: flex; align-items: center; gap: 6px; background: var(--amber); color: var(--ink); border: none; border-radius: 6px; padding: 10px 16px; font-weight: 600; font-size: 14px; }
+  #connStatus { display: none; align-items: center; gap: 6px; font-size: 12.5px; color: var(--amber); }
 
   .alert-strip { background: var(--soon-tint); border-bottom: 1px solid #E8C88C; }
-  .alert-toggle {
-    width: 100%; max-width: 1100px; margin: 0 auto; display: flex; align-items: center; gap: 10px;
-    padding: 10px 20px; background: none; border: none; text-align: left; color: #7A5310; font-size: 14px;
-  }
-  .alert-toggle .count { font-weight: 600; }
+  .alert-toggle { width: 100%; max-width: 1100px; margin: 0 auto; display: flex; align-items: center; gap: 10px; padding: 10px 20px; background: none; border: none; text-align: left; color: #7A5310; font-size: 14px; }
   .alert-toggle .breakdown { color: var(--critical-text); font-size: 13px; }
   .alert-toggle .chev { margin-left: auto; transition: transform 0.15s; }
   .alert-toggle.open .chev { transform: rotate(180deg); }
   .alert-list { max-width: 1100px; margin: 0 auto; padding: 0 20px 14px; display: none; flex-direction: column; gap: 6px; }
   .alert-list.open { display: flex; }
-  .alert-row {
-    display: flex; justify-content: space-between; background: #fff; border-radius: 6px;
-    padding: 8px 12px; font-size: 13px;
-  }
+  .alert-row { display: flex; justify-content: space-between; background: #fff; border-radius: 6px; padding: 8px 12px; font-size: 13px; }
   .alert-row .name { font-weight: 600; }
   .alert-row .meta { color: var(--muted); display: flex; gap: 12px; }
 
   main { max-width: 1100px; margin: 0 auto; padding: 20px 20px 80px; }
-
   .toolbar { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
   .search-wrap { position: relative; flex: 1 1 220px; min-width: 180px; }
   .search-wrap svg { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); }
@@ -101,7 +91,6 @@
   .no-match { text-align: center; padding: 60px 20px; color: var(--muted); }
 
   .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 16px; margin-top: 20px; }
-
   .tag-card { background: #fff; border-radius: 8px; overflow: hidden; box-shadow: 0 1px 3px rgba(28,37,48,0.1); border: 1px solid var(--border-light); }
   .tag-band { height: 5px; }
   .tag-body { padding: 14px 16px; }
@@ -136,135 +125,249 @@
   .upc-row .field-input { flex: 1; }
   .scan-btn { display: flex; align-items: center; gap: 5px; padding: 0 12px; border-radius: 7px; border: 1px solid var(--border); background: var(--surface); color: var(--accent); font-weight: 600; font-size: 13px; white-space: nowrap; }
   .scan-btn.active { background: var(--expired-tint); color: var(--expired-band); }
-  #scanVideo { width: 100%; border-radius: 7px; margin-top: 8px; background: #000; display: none; }
+  #scanVideo { width: 100%; border-radius: 7px; margin-top: 8px; background: #000; display: none; max-height: 260px; object-fit: cover; }
   #scanVideo.on { display: block; }
   .scan-error { font-size: 12px; color: var(--critical-text); margin-top: 6px; }
+  .lookup-note { font-size: 12px; margin-top: 6px; display: none; align-items: center; gap: 5px; }
+  .lookup-note.show { display: flex; }
+  .lookup-note.found { color: var(--ok-text); }
+  .lookup-note.notfound { color: var(--muted); }
   .form-error { font-size: 13px; color: var(--expired-band); font-weight: 500; }
   .submit-btn { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 12px 0; font-weight: 700; font-size: 14.5px; margin-top: 4px; }
 
-  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 7px; font-size: 13.5px; font-weight: 500; box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 300; display: none; align-items: center; gap: 6px; }
+  /* ---------- workers modal ---------- */
+  .worker-row { display: flex; align-items: center; justify-content: space-between; padding: 10px 0; border-bottom: 1px solid var(--card-border); }
+  .worker-row:last-child { border-bottom: none; }
+  .worker-name { font-weight: 600; font-size: 14px; }
+  .worker-meta { font-size: 12px; color: var(--muted); margin-top: 2px; }
+  .worker-remove { background: var(--expired-tint); color: var(--expired-band); border: none; border-radius: 6px; padding: 6px 10px; font-size: 12px; font-weight: 600; }
+  .add-worker-form { display: flex; gap: 8px; margin-top: 14px; flex-wrap: wrap; }
+  .add-worker-form input { flex: 1; min-width: 120px; padding: 9px 10px; border-radius: 7px; border: 1px solid var(--border); font-size: 13.5px; }
+  .add-worker-btn { background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 9px 14px; font-weight: 600; font-size: 13px; }
+  .section-label { font-size: 12.5px; font-weight: 700; color: var(--muted-2); text-transform: uppercase; letter-spacing: 0.5px; margin: 18px 0 8px; }
+  .section-label:first-child { margin-top: 0; }
+
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 7px; font-size: 13.5px; font-weight: 500; box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 300; display: none; align-items: center; gap: 6px; max-width: 90vw; text-align: center; }
   .toast.show { display: flex; }
 </style>
 </head>
 <body>
 
-<header>
-  <div class="header-inner">
-    <div class="brand">
-      <div class="brand-icon">
+<!-- ============ AUTH SCREEN ============ -->
+<div class="auth-wrap" id="authScreen">
+  <div class="auth-card">
+    <div class="auth-logo">
+      <div class="auth-logo-icon">
         <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
       </div>
-      <div>
-        <div class="brand-title">FLOORSTOCK</div>
-        <div class="brand-sub">INVENTORY &amp; EXPIRATION TRACKING</div>
+      <div class="auth-logo-title">FLOORSTOCK</div>
+    </div>
+
+    <div class="auth-tabs">
+      <button class="auth-tab active" id="tabLogin">Sign in</button>
+      <button class="auth-tab" id="tabRegister">New store</button>
+    </div>
+
+    <div id="loginPane">
+      <div class="auth-error" id="loginError" style="display:none;"></div>
+      <form id="loginForm">
+        <div class="auth-field">
+          <label>Username</label>
+          <input type="text" id="loginUsername" autocomplete="username">
+        </div>
+        <div class="auth-field">
+          <label>Password</label>
+          <input type="password" id="loginPassword" autocomplete="current-password">
+        </div>
+        <button type="submit" class="auth-submit" id="loginSubmit">Sign in</button>
+      </form>
+      <div class="auth-hint">Workers: use the username and password your manager gave you.</div>
+    </div>
+
+    <div id="registerPane" style="display:none;">
+      <div class="role-note">
+        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="flex-shrink:0;margin-top:1px;"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4"/><path d="M12 8h.01"/></svg>
+        This creates a new store and signs you in as its manager. You can add worker logins afterward.
       </div>
-    </div>
-    <div style="display:flex;align-items:center;gap:14px;">
-    <div id="connStatus" style="display:none;align-items:center;gap:6px;font-size:12.5px;color:#F5A623;">
-      <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-      Can&rsquo;t reach server
-    </div>
-    <button class="btn-primary" id="newTagBtn">
-      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-      New tag
-    </button>
+      <div class="auth-error" id="registerError" style="display:none;"></div>
+      <form id="registerForm">
+        <div class="auth-field">
+          <label>Store name</label>
+          <input type="text" id="regStoreName" placeholder="e.g. Westside Market">
+        </div>
+        <div class="auth-field">
+          <label>Store address</label>
+          <input type="text" id="regStoreAddress" placeholder="e.g. 412 Elm St, Springfield">
+        </div>
+        <div class="auth-field">
+          <label>Manager username</label>
+          <input type="text" id="regUsername" autocomplete="username">
+        </div>
+        <div class="auth-field">
+          <label>Manager password</label>
+          <input type="password" id="regPassword" autocomplete="new-password">
+        </div>
+        <button type="submit" class="auth-submit" id="registerSubmit">Create store</button>
+      </form>
     </div>
   </div>
-</header>
-
-<div class="alert-strip" id="alertStrip" style="display:none;">
-  <button class="alert-toggle" id="alertToggle">
-    <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-    <span class="count" id="alertCount"></span>
-    <span class="breakdown" id="alertBreakdown"></span>
-    <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
-  </button>
-  <div class="alert-list" id="alertList"></div>
 </div>
 
-<main>
-  <div class="toolbar">
-    <div class="search-wrap">
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A97A3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
-      <input id="searchInput" placeholder="Search name, UPC, or location">
-    </div>
-    <select class="tool-select" id="locationFilter"><option value="all">All locations</option></select>
-    <select class="tool-select" id="urgencyFilter">
-      <option value="all">All statuses</option>
-      <option value="expired">Expired</option>
-      <option value="critical">Critical (≤3d)</option>
-      <option value="soon">Soon (≤14d)</option>
-      <option value="ok">Fresh</option>
-    </select>
-    <select class="tool-select" id="sortBy">
-      <option value="expiration">Sort: expiration</option>
-      <option value="name">Sort: name</option>
-      <option value="location">Sort: location</option>
-    </select>
-  </div>
-
-  <div class="empty-state" id="emptyState" style="display:none;">
-    <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#8A97A3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:10px;"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
-    <div class="title">No stock tagged yet</div>
-    <div class="sub">Scan or add the first product coming onto the floor.</div>
-    <button id="emptyAddBtn">Add first tag</button>
-  </div>
-
-  <div class="no-match" id="noMatch" style="display:none;">No tags match those filters.</div>
-
-  <div class="grid" id="grid"></div>
-</main>
-
-<div class="modal-overlay" id="modalOverlay">
-  <div class="modal">
-    <div class="modal-header">
-      <div class="modal-title" id="modalTitle">NEW TAG</div>
-      <button class="modal-close" id="modalCloseBtn">
-        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
-      </button>
-    </div>
-    <form id="itemForm">
-      <input type="hidden" id="editId">
-      <div>
-        <label class="field-label">UPC / barcode</label>
-        <div class="upc-row">
-          <input class="field-input mono" id="upcInput" placeholder="e.g. 041220576428">
-          <button type="button" class="scan-btn" id="scanBtn">
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-            <span id="scanBtnLabel">Scan</span>
-          </button>
-        </div>
-        <video id="scanVideo" muted playsinline></video>
-        <div class="scan-error" id="scanError" style="display:none;"></div>
-      </div>
-      <div>
-        <label class="field-label">Product name</label>
-        <input class="field-input" id="nameInput" placeholder="e.g. Organic Whole Milk 1gal">
-      </div>
-      <div>
-        <label class="field-label">Expiration date</label>
-        <input class="field-input" type="date" id="expInput">
-      </div>
-      <div class="row-2">
-        <div>
-          <label class="field-label">Quantity</label>
-          <input class="field-input mono" type="number" min="0" step="any" id="qtyInput" placeholder="0">
+<!-- ============ APP SHELL ============ -->
+<div id="appShell" style="display:none;">
+  <header>
+    <div class="header-inner">
+      <div class="brand">
+        <div class="brand-icon">
+          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
         </div>
         <div>
-          <label class="field-label">Unit</label>
-          <select class="field-input" id="unitInput">
-            <option>each</option><option>case</option><option>box</option><option>pallet</option>
-            <option>lb</option><option>kg</option><option>oz</option><option>gal</option><option>L</option>
-          </select>
+          <div class="brand-title">FLOORSTOCK</div>
+          <div class="brand-sub" id="storeSub">INVENTORY &amp; EXPIRATION TRACKING</div>
         </div>
       </div>
-      <div>
-        <label class="field-label">Location on floor</label>
-        <input class="field-input" id="locInput" placeholder="e.g. Aisle 4, Shelf B">
+      <div class="header-right">
+        <div id="connStatus">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+          Can&rsquo;t reach server
+        </div>
+        <div class="store-pill" id="storePill"></div>
+        <button class="btn-ghost" id="workersBtn" style="display:none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+          Workers
+        </button>
+        <button class="btn-ghost" id="logoutBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+          Sign out
+        </button>
+        <button class="btn-primary" id="newTagBtn">
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+          New tag
+        </button>
       </div>
-      <div class="form-error" id="formError" style="display:none;"></div>
-      <button type="submit" class="submit-btn" id="submitBtn">Add to floor</button>
-    </form>
+    </div>
+  </header>
+
+  <div class="alert-strip" id="alertStrip" style="display:none;">
+    <button class="alert-toggle" id="alertToggle">
+      <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
+      <span class="count" id="alertCount"></span>
+      <span class="breakdown" id="alertBreakdown"></span>
+      <svg class="chev" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+    </button>
+    <div class="alert-list" id="alertList"></div>
+  </div>
+
+  <main>
+    <div class="toolbar">
+      <div class="search-wrap">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#8A97A3" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/></svg>
+        <input id="searchInput" placeholder="Search name, UPC, or location">
+      </div>
+      <select class="tool-select" id="locationFilter"><option value="all">All locations</option></select>
+      <select class="tool-select" id="urgencyFilter">
+        <option value="all">All statuses</option>
+        <option value="expired">Expired</option>
+        <option value="critical">Critical (≤3d)</option>
+        <option value="soon">Soon (≤14d)</option>
+        <option value="ok">Fresh</option>
+      </select>
+      <select class="tool-select" id="sortBy">
+        <option value="expiration">Sort: expiration</option>
+        <option value="name">Sort: name</option>
+        <option value="location">Sort: location</option>
+      </select>
+    </div>
+
+    <div class="empty-state" id="emptyState" style="display:none;">
+      <svg width="38" height="38" viewBox="0 0 24 24" fill="none" stroke="#8A97A3" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" style="margin-bottom:10px;"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+      <div class="title">No stock tagged yet</div>
+      <div class="sub">Scan or add the first product coming onto the floor.</div>
+      <button id="emptyAddBtn">Add first tag</button>
+    </div>
+
+    <div class="no-match" id="noMatch" style="display:none;">No tags match those filters.</div>
+    <div class="grid" id="grid"></div>
+  </main>
+
+  <!-- item modal -->
+  <div class="modal-overlay" id="modalOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title" id="modalTitle">NEW TAG</div>
+        <button class="modal-close" id="modalCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <form id="itemForm">
+        <input type="hidden" id="editId">
+        <div>
+          <label class="field-label">UPC / barcode</label>
+          <div class="upc-row">
+            <input class="field-input mono" id="upcInput" placeholder="e.g. 041220576428">
+            <button type="button" class="scan-btn" id="scanBtn">
+              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+              <span id="scanBtnLabel">Scan</span>
+            </button>
+          </div>
+          <video id="scanVideo" muted playsinline></video>
+          <div class="scan-error" id="scanError" style="display:none;"></div>
+          <div class="lookup-note" id="lookupNote"></div>
+        </div>
+        <div>
+          <label class="field-label">Product name</label>
+          <input class="field-input" id="nameInput" placeholder="e.g. Organic Whole Milk 1gal">
+        </div>
+        <div>
+          <label class="field-label">Expiration date</label>
+          <input class="field-input" type="date" id="expInput">
+        </div>
+        <div class="row-2">
+          <div>
+            <label class="field-label">Quantity</label>
+            <input class="field-input mono" type="number" min="0" step="any" id="qtyInput" placeholder="0">
+          </div>
+          <div>
+            <label class="field-label">Unit</label>
+            <select class="field-input" id="unitInput">
+              <option>each</option><option>case</option><option>box</option><option>pallet</option>
+              <option>lb</option><option>kg</option><option>oz</option><option>gal</option><option>L</option>
+            </select>
+          </div>
+        </div>
+        <div>
+          <label class="field-label">Location on floor</label>
+          <input class="field-input" id="locInput" placeholder="e.g. Aisle 4, Shelf B">
+        </div>
+        <div class="form-error" id="formError" style="display:none;"></div>
+        <button type="submit" class="submit-btn" id="submitBtn">Add to floor</button>
+      </form>
+    </div>
+  </div>
+
+  <!-- workers modal -->
+  <div class="modal-overlay" id="workersOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">WORKER LOGINS</div>
+        <button class="modal-close" id="workersCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <div class="section-label">Current workers</div>
+        <div id="workerList"></div>
+        <div id="workerEmpty" style="font-size:13px;color:var(--muted);display:none;">No worker logins yet.</div>
+
+        <div class="section-label">Add a worker</div>
+        <div class="auth-error" id="workerError" style="display:none;"></div>
+        <form class="add-worker-form" id="addWorkerForm">
+          <input id="newWorkerUsername" placeholder="Username">
+          <input id="newWorkerPassword" placeholder="Password" type="password">
+          <button type="submit" class="add-worker-btn">Add</button>
+        </form>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -281,48 +384,243 @@
   const POLL_INTERVAL_MS = 10000;
   let items = [];
   let editingId = null;
-  let scanStream = null;
-  let scanRAF = null;
-  let detector = null;
+  let currentUser = null; // { role, username, store }
   let isSubmitting = false;
+  let lookupTimer = null;
 
-  // ---------- API ----------
+  // ---------- generic API helper ----------
   async function apiRequest(path, options) {
     let res;
     try {
-      res = await fetch(path, options);
+      res = await fetch(path, Object.assign({ credentials: 'same-origin' }, options));
     } catch (e) {
       throw new Error('Can\u2019t reach the server — check your connection.');
     }
     if (!res.ok) {
       let msg = 'Something went wrong.';
       try { const body = await res.json(); if (body.error) msg = body.error; } catch (e) {}
-      throw new Error(msg);
+      const err = new Error(msg);
+      err.status = res.status;
+      throw err;
     }
     if (res.status === 204) return null;
     return res.json();
   }
 
-  async function loadItems() {
+  function esc(str) {
+    const d = document.createElement('div'); d.textContent = str == null ? '' : String(str);
+    return d.innerHTML;
+  }
+  function uid() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 8); }
+
+  let toastTimer = null;
+  function showToast(msg) {
+    const el = document.getElementById('toast');
+    document.getElementById('toastMsg').textContent = msg;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), 2600);
+  }
+
+  // =====================================================================
+  // AUTH
+  // =====================================================================
+
+  document.getElementById('tabLogin').addEventListener('click', () => switchAuthTab('login'));
+  document.getElementById('tabRegister').addEventListener('click', () => switchAuthTab('register'));
+
+  function switchAuthTab(which) {
+    document.getElementById('tabLogin').classList.toggle('active', which === 'login');
+    document.getElementById('tabRegister').classList.toggle('active', which === 'register');
+    document.getElementById('loginPane').style.display = which === 'login' ? 'block' : 'none';
+    document.getElementById('registerPane').style.display = which === 'register' ? 'block' : 'none';
+  }
+
+  document.getElementById('loginForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('loginError');
+    const username = document.getElementById('loginUsername').value.trim();
+    const password = document.getElementById('loginPassword').value;
+    if (!username || !password) {
+      errEl.textContent = 'Enter your username and password.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const btn = document.getElementById('loginSubmit');
+    btn.disabled = true; btn.textContent = 'Signing in\u2026';
     try {
-      items = await apiRequest(API_BASE);
-      setConnectionStatus(true);
-    } catch (e) {
-      setConnectionStatus(false);
+      const result = await apiRequest('/api/auth/login', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      currentUser = result;
+      errEl.style.display = 'none';
+      enterApp();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false; btn.textContent = 'Sign in';
+    }
+  });
+
+  document.getElementById('registerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('registerError');
+    const storeName = document.getElementById('regStoreName').value.trim();
+    const storeAddress = document.getElementById('regStoreAddress').value.trim();
+    const username = document.getElementById('regUsername').value.trim();
+    const password = document.getElementById('regPassword').value;
+
+    if (!storeName || !storeAddress || !username || !password) {
+      errEl.textContent = 'Fill in every field to create your store.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (password.length < 6) {
+      errEl.textContent = 'Password must be at least 6 characters.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const btn = document.getElementById('registerSubmit');
+    btn.disabled = true; btn.textContent = 'Creating store\u2026';
+    try {
+      const result = await apiRequest('/api/auth/register-store', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ storeName, storeAddress, username, password }),
+      });
+      currentUser = result;
+      errEl.style.display = 'none';
+      enterApp();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false; btn.textContent = 'Create store';
+    }
+  });
+
+  document.getElementById('logoutBtn').addEventListener('click', async () => {
+    try { await apiRequest('/api/auth/logout', { method: 'POST' }); } catch (e) {}
+    currentUser = null;
+    items = [];
+    document.getElementById('appShell').style.display = 'none';
+    document.getElementById('authScreen').style.display = 'flex';
+    document.getElementById('loginUsername').value = '';
+    document.getElementById('loginPassword').value = '';
+  });
+
+  function enterApp() {
+    document.getElementById('authScreen').style.display = 'none';
+    document.getElementById('appShell').style.display = 'block';
+    document.getElementById('storeSub').textContent = currentUser.store.name.toUpperCase();
+    document.getElementById('storePill').innerHTML =
+      `${esc(currentUser.store.name)} <span class="role-badge">${esc(currentUser.role)}</span>`;
+    document.getElementById('workersBtn').style.display = currentUser.role === 'manager' ? 'flex' : 'none';
+    init();
+  }
+
+  async function checkExistingSession() {
+    try {
+      const me = await apiRequest('/api/auth/me');
+      if (me.signedIn) {
+        currentUser = { role: me.role, username: me.username, store: me.store };
+        enterApp();
+        return;
+      }
+    } catch (e) {}
+    document.getElementById('authScreen').style.display = 'flex';
+  }
+
+  // =====================================================================
+  // WORKERS (manager only)
+  // =====================================================================
+
+  document.getElementById('workersBtn').addEventListener('click', openWorkersModal);
+  document.getElementById('workersCloseBtn').addEventListener('click', () => {
+    document.getElementById('workersOverlay').classList.remove('open');
+  });
+  document.getElementById('workersOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'workersOverlay') document.getElementById('workersOverlay').classList.remove('open');
+  });
+
+  async function openWorkersModal() {
+    document.getElementById('workersOverlay').classList.add('open');
+    document.getElementById('workerError').style.display = 'none';
+    await loadWorkers();
+  }
+
+  async function loadWorkers() {
+    try {
+      const workers = await apiRequest('/api/workers');
+      const list = document.getElementById('workerList');
+      const empty = document.getElementById('workerEmpty');
+      if (workers.length === 0) {
+        list.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+      list.innerHTML = workers.map(w => `
+        <div class="worker-row">
+          <div>
+            <div class="worker-name">${esc(w.username)}</div>
+            <div class="worker-meta">Added ${new Date(w.createdAt).toLocaleDateString()}</div>
+          </div>
+          <button type="button" class="worker-remove" data-id="${w.id}">Remove</button>
+        </div>
+      `).join('');
+      list.querySelectorAll('.worker-remove').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            await apiRequest(`/api/workers/${btn.dataset.id}`, { method: 'DELETE' });
+            showToast('Worker removed');
+            await loadWorkers();
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+      });
+    } catch (err) {
+      showToast(err.message);
     }
   }
 
-  function setConnectionStatus(online) {
-    const el = document.getElementById('connStatus');
-    if (!el) return;
-    if (online) {
-      el.style.display = 'none';
-    } else {
-      el.style.display = 'flex';
+  document.getElementById('addWorkerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('workerError');
+    const username = document.getElementById('newWorkerUsername').value.trim();
+    const password = document.getElementById('newWorkerPassword').value;
+    if (!username || !password) {
+      errEl.textContent = 'Enter a username and password for the worker.';
+      errEl.style.display = 'block';
+      return;
     }
-  }
+    if (password.length < 6) {
+      errEl.textContent = 'Password must be at least 6 characters.';
+      errEl.style.display = 'block';
+      return;
+    }
+    try {
+      await apiRequest('/api/workers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      errEl.style.display = 'none';
+      document.getElementById('newWorkerUsername').value = '';
+      document.getElementById('newWorkerPassword').value = '';
+      showToast('Worker added');
+      await loadWorkers();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    }
+  });
 
-  // ---------- helpers ----------
+  // =====================================================================
+  // ITEMS: helpers
+  // =====================================================================
+
   function daysUntil(dateStr) {
     const today = new Date(); today.setHours(0,0,0,0);
     const target = new Date(dateStr + 'T00:00:00');
@@ -352,25 +650,28 @@
     if (d === 1) return '1 day left';
     return d + ' days left';
   }
-  function esc(str) {
-    const d = document.createElement('div'); d.textContent = str == null ? '' : String(str);
-    return d.innerHTML;
+  function locationPin() {
+    return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>`;
   }
 
-  let toastTimer = null;
-  function showToast(msg) {
-    const el = document.getElementById('toast');
-    document.getElementById('toastMsg').textContent = msg;
-    el.classList.add('show');
-    clearTimeout(toastTimer);
-    toastTimer = setTimeout(() => el.classList.remove('show'), 2400);
+  // ---------- data loading ----------
+  async function loadItems() {
+    try {
+      items = await apiRequest(API_BASE);
+      setConnectionStatus(true);
+    } catch (e) {
+      if (e.status === 401) { await checkExistingSession(); return; }
+      setConnectionStatus(false);
+    }
+  }
+  function setConnectionStatus(online) {
+    const el = document.getElementById('connStatus');
+    el.style.display = online ? 'none' : 'flex';
   }
 
-  // ---------- rendering ----------
   function getLocations() {
     return Array.from(new Set(items.map(i => i.location).filter(Boolean))).sort();
   }
-
   function renderLocationOptions() {
     const sel = document.getElementById('locationFilter');
     const current = sel.value;
@@ -407,9 +708,6 @@
         </span>
       </div>`;
     }).join('');
-  }
-  function locationPin() {
-    return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>`;
   }
 
   function getFiltered() {
@@ -490,20 +788,19 @@
       </div>`;
     }).join('');
 
-    grid.querySelectorAll('.edit-btn').forEach(btn => {
-      btn.addEventListener('click', () => openModal(btn.dataset.id));
-    });
-    grid.querySelectorAll('.del-btn').forEach(btn => {
-      btn.addEventListener('click', () => handleDeleteClick(btn));
-    });
+    grid.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', () => openModal(btn.dataset.id)));
+    grid.querySelectorAll('.del-btn').forEach(btn => btn.addEventListener('click', () => handleDeleteClick(btn)));
   }
 
   async function handleDeleteClick(btn) {
     if (!btn.classList.contains('confirm')) {
       btn.classList.add('confirm');
       btn.textContent = 'Confirm';
-      const blur = () => { btn.classList.remove('confirm'); btn.textContent = ''; btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>'; };
-      const onBlur = () => { blur(); btn.removeEventListener('blur', onBlur); };
+      const onBlur = () => {
+        btn.classList.remove('confirm');
+        btn.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>';
+        btn.removeEventListener('blur', onBlur);
+      };
       btn.addEventListener('blur', onBlur);
       btn.focus();
       return;
@@ -525,7 +822,10 @@
     renderGrid();
   }
 
-  // ---------- modal / form ----------
+  // =====================================================================
+  // ITEM MODAL / UPC LOOKUP / SCANNING
+  // =====================================================================
+
   function openModal(id) {
     editingId = id || null;
     const item = editingId ? items.find(i => i.id === editingId) : null;
@@ -541,14 +841,18 @@
     document.getElementById('locInput').value = item ? item.location : '';
     document.getElementById('formError').style.display = 'none';
     document.getElementById('scanError').style.display = 'none';
+    hideLookupNote();
     document.getElementById('modalOverlay').classList.add('open');
   }
-
   function closeModal() {
     stopScan();
     document.getElementById('modalOverlay').classList.remove('open');
     editingId = null;
   }
+  document.getElementById('newTagBtn').addEventListener('click', () => openModal(null));
+  document.getElementById('emptyAddBtn').addEventListener('click', () => openModal(null));
+  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
+  document.getElementById('modalOverlay').addEventListener('click', (e) => { if (e.target.id === 'modalOverlay') closeModal(); });
 
   async function submitForm(e) {
     e.preventDefault();
@@ -586,17 +890,13 @@
     try {
       if (editingId) {
         const updated = await apiRequest(`${API_BASE}/${editingId}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
+          method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
         });
         items = items.map(i => i.id === editingId ? updated : i);
         showToast('Tag updated');
       } else {
         const created = await apiRequest(API_BASE, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(data),
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
         });
         items.push(created);
         showToast('Tag added to floor');
@@ -612,18 +912,58 @@
       submitBtn.textContent = originalLabel;
     }
   }
+  document.getElementById('itemForm').addEventListener('submit', submitForm);
 
-  // ---------- barcode scanning ----------
+  // ---------- UPC product lookup ----------
+  function hideLookupNote() {
+    const el = document.getElementById('lookupNote');
+    el.classList.remove('show', 'found', 'notfound');
+    el.innerHTML = '';
+  }
+
+  async function lookupUpc(upc) {
+    if (!upc || upc.length < 6) { hideLookupNote(); return; }
+    const note = document.getElementById('lookupNote');
+    note.classList.add('show');
+    note.classList.remove('found', 'notfound');
+    note.textContent = 'Looking up product\u2026';
+    try {
+      const result = await apiRequest(`/api/upc-lookup/${encodeURIComponent(upc)}`);
+      if (result.found && result.name) {
+        note.classList.add('found');
+        note.innerHTML = `<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg> Recognized: ${esc(result.name)}`;
+        const nameInput = document.getElementById('nameInput');
+        if (!nameInput.value.trim()) nameInput.value = result.name;
+      } else {
+        note.classList.add('notfound');
+        note.textContent = 'Product not found in database \u2014 enter the name manually.';
+      }
+    } catch (e) {
+      hideLookupNote();
+    }
+  }
+
+  document.getElementById('upcInput').addEventListener('input', (e) => {
+    clearTimeout(lookupTimer);
+    const val = e.target.value.trim();
+    lookupTimer = setTimeout(() => lookupUpc(val), 500);
+  });
+
+  // ---------- barcode scanning (ZXing — works in Safari/iOS unlike BarcodeDetector) ----------
+  let zxingReader = null;
+  let scanning = false;
+
   function stopScan() {
-    if (scanRAF) cancelAnimationFrame(scanRAF);
-    scanRAF = null;
-    if (scanStream) {
-      scanStream.getTracks().forEach(t => t.stop());
-      scanStream = null;
+    scanning = false;
+    if (zxingReader) {
+      try { zxingReader.reset(); } catch (e) {}
     }
     const video = document.getElementById('scanVideo');
     video.classList.remove('on');
-    video.srcObject = null;
+    if (video.srcObject) {
+      video.srcObject.getTracks().forEach(t => t.stop());
+      video.srcObject = null;
+    }
     document.getElementById('scanBtn').classList.remove('active');
     document.getElementById('scanBtnLabel').textContent = 'Scan';
   }
@@ -632,35 +972,40 @@
     const errEl = document.getElementById('scanError');
     errEl.style.display = 'none';
 
-    if (!('BarcodeDetector' in window)) {
-      errEl.textContent = 'Live scanning isn\u2019t supported in this browser \u2014 enter the UPC manually below.';
+    if (typeof ZXing === 'undefined') {
+      errEl.textContent = 'Scanner failed to load \u2014 check your connection, or enter the UPC manually below.';
       errEl.style.display = 'block';
       return;
     }
+
     try {
-      detector = new window.BarcodeDetector({ formats: ['upc_a','upc_e','ean_13','ean_8','code_128'] });
-      const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-      scanStream = stream;
       const video = document.getElementById('scanVideo');
-      video.srcObject = stream;
       video.classList.add('on');
-      await video.play();
+      scanning = true;
       document.getElementById('scanBtn').classList.add('active');
       document.getElementById('scanBtnLabel').textContent = 'Stop';
 
-      const tick = async () => {
-        if (!scanStream) return;
-        try {
-          const codes = await detector.detect(video);
-          if (codes.length > 0) {
-            document.getElementById('upcInput').value = codes[0].rawValue;
-            stopScan();
-            return;
-          }
-        } catch (e) { /* keep trying */ }
-        scanRAF = requestAnimationFrame(tick);
-      };
-      scanRAF = requestAnimationFrame(tick);
+      const hints = new Map();
+      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+        ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+        ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+        ZXing.BarcodeFormat.CODE_128,
+      ]);
+      zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+
+      // Prefer the rear/environment camera on phones.
+      const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
+      let deviceId = devices.length ? devices[devices.length - 1].deviceId : undefined;
+      const rear = devices.find(d => /back|rear|environment/i.test(d.label));
+      if (rear) deviceId = rear.deviceId;
+
+      zxingReader.decodeFromVideoDevice(deviceId, video, (result, err) => {
+        if (result && scanning) {
+          document.getElementById('upcInput').value = result.getText();
+          lookupUpc(result.getText());
+          stopScan();
+        }
+      });
     } catch (e) {
       errEl.textContent = 'Camera access was blocked or unavailable \u2014 enter the UPC manually below.';
       errEl.style.display = 'block';
@@ -668,27 +1013,26 @@
     }
   }
 
-  // ---------- wire up ----------
-  document.getElementById('newTagBtn').addEventListener('click', () => openModal(null));
-  document.getElementById('emptyAddBtn').addEventListener('click', () => openModal(null));
-  document.getElementById('modalCloseBtn').addEventListener('click', closeModal);
-  document.getElementById('modalOverlay').addEventListener('click', (e) => { if (e.target.id === 'modalOverlay') closeModal(); });
-  document.getElementById('itemForm').addEventListener('submit', submitForm);
-  document.getElementById('scanBtn').addEventListener('click', () => { scanStream ? stopScan() : startScan(); });
+  document.getElementById('scanBtn').addEventListener('click', () => { scanning ? stopScan() : startScan(); });
+
+  // =====================================================================
+  // TOOLBAR + ALERT WIRING
+  // =====================================================================
 
   document.getElementById('alertToggle').addEventListener('click', function () {
     this.classList.toggle('open');
     document.getElementById('alertList').classList.toggle('open');
   });
-
   ['searchInput'].forEach(id => document.getElementById(id).addEventListener('input', renderGrid));
   ['locationFilter','urgencyFilter','sortBy'].forEach(id => document.getElementById(id).addEventListener('change', renderGrid));
 
   document.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape' && document.getElementById('modalOverlay').classList.contains('open')) closeModal();
+    if (e.key !== 'Escape') return;
+    if (document.getElementById('modalOverlay').classList.contains('open')) closeModal();
+    if (document.getElementById('workersOverlay').classList.contains('open')) document.getElementById('workersOverlay').classList.remove('open');
   });
 
-  // ---------- polling (picks up changes from other devices) ----------
+  // ---------- polling ----------
   async function poll() {
     if (document.getElementById('modalOverlay').classList.contains('open')) return;
     if (document.hidden) return;
@@ -696,13 +1040,14 @@
     renderAll();
   }
 
-  // ---------- init ----------
-  (async function init() {
+  async function init() {
     await loadItems();
     renderAll();
     setInterval(poll, POLL_INTERVAL_MS);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
-  })();
+  }
+
+  checkExistingSession();
 })();
 </script>
 </body>
