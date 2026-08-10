@@ -92,8 +92,12 @@ and required on the routes marked "auth".
 
 ## Notes on the UPC lookup
 
-It uses UPCitemdb's free trial endpoint, which doesn't require an API key but is capped
-at roughly 100 lookups per day per server. If you outgrow that, swapping in a paid
-lookup provider only requires changing the one function in `server.js` that calls it
+It checks [Open Food Facts](https://world.openfoodfacts.org) first (free, no key, no
+rate limit worth worrying about, huge food/beverage coverage) and falls back to
+UPCitemdb's free trial tier for non-food items it doesn't have. Because Open Food Facts
+is food/beverage-focused, things like household goods, tobacco, or auto items may still
+come back "not found" — that's expected, and the form always accepts a manually typed
+name either way. If you want broader non-food coverage later, swapping in a paid lookup
+provider only requires editing the one function in `server.js` that calls these services
 (`/api/upc-lookup/:upc`) — the frontend doesn't need to change.
 

@@ -236,23 +236,44 @@ app.get('/api/upc-lookup/:upc', requireAuth, async (req, res) => {
   const upc = String(req.params.upc || '').trim();
   if (!upc) return res.status(400).json({ error: 'UPC is required.' });
 
+  // Primary: Open Food Facts — free, no key, reliable, huge food/beverage coverage.
+  try {
+    const offResponse = await fetch(
+      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(upc)}.json`,
+      { headers: { 'User-Agent': 'FloorStock-InventoryApp/1.0' } }
+    );
+    if (offResponse.ok) {
+      const offData = await offResponse.json();
+      if (offData.status === 1 && offData.product) {
+        let name = (offData.product.product_name || '').trim();
+        const brand = (offData.product.brands || '').split(',')[0].trim();
+        if (brand && !name.toLowerCase().includes(brand.toLowerCase())) {
+          name = name ? `${brand} ${name}` : brand;
+        }
+        if (name) {
+          return res.json({ found: true, name, brand: brand || null });
+        }
+      }
+    }
+  } catch (e) {
+    // fall through to the secondary source
+  }
+
+  // Fallback: UPCitemdb trial — covers more non-food items, best effort only.
   try {
     const response = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(upc)}`);
-    if (!response.ok) {
-      return res.json({ found: false });
+    if (response.ok) {
+      const data = await response.json();
+      const item = data.items && data.items[0];
+      if (item && item.title) {
+        return res.json({ found: true, name: item.title, brand: item.brand || null });
+      }
     }
-    const data = await response.json();
-    const item = data.items && data.items[0];
-    if (!item) return res.json({ found: false });
-    res.json({
-      found: true,
-      name: item.title || null,
-      brand: item.brand || null,
-    });
   } catch (e) {
-    // Lookup service being unreachable shouldn't break manual entry.
-    res.json({ found: false });
+    // both sources failed — fall through to not-found
   }
+
+  res.json({ found: false });
 });
 
 // =====================================================================
