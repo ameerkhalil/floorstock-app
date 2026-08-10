@@ -106,6 +106,8 @@
   .tag-status { flex-shrink: 0; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 4px; letter-spacing: 0.4px; text-transform: uppercase; }
   .tag-upc { font-family: 'IBM Plex Mono', monospace; font-size: 12px; color: var(--muted); margin-top: 4px; }
   .tag-size { color: var(--muted-2); font-weight: 600; }
+  .tag-price { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; color: var(--ok-text); margin-top: 8px; }
+  .tag-price-cost { font-family: 'Inter', sans-serif; font-weight: 500; color: var(--muted); font-size: 11.5px; }
   .tag-loc { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 13px; color: var(--muted-2); }
   .tag-bottom { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px; }
   .tag-date { font-size: 12px; color: var(--muted); }
@@ -141,6 +143,11 @@
   .lookup-note.found { color: var(--ok-text); }
   .lookup-note.notfound { color: var(--muted); }
   .batch-panel { margin-top: 10px; background: var(--soon-tint); border: 1px solid #E8C88C; border-radius: 8px; padding: 10px 12px; }
+  .batch-entry-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; }
+  .batch-entry-row .field-input { margin: 0; }
+  .batch-entry-row .batch-exp { flex: 1.3; }
+  .batch-entry-row .batch-qty { flex: 1; }
+  .batch-entry-remove { background: var(--surface); border: none; border-radius: 6px; width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--expired-band); }
   .batch-panel-title { font-size: 12.5px; font-weight: 700; color: #7A5310; margin-bottom: 6px; }
   .batch-match { display: flex; justify-content: space-between; align-items: center; background: #fff; border-radius: 6px; padding: 8px 10px; font-size: 12.5px; margin-bottom: 6px; }
   .batch-match:last-child { margin-bottom: 0; }
@@ -246,7 +253,12 @@
           <input type="password" id="regPassword" autocomplete="new-password">
         </div>
         <button type="submit" class="auth-submit" id="registerSubmit">Create store</button>
+        <div class="auth-hint">By creating a store, you agree to the <a href="/terms.html" style="color:var(--accent);">Terms of Service</a> and <a href="/privacy.html" style="color:var(--accent);">Privacy Policy</a>.</div>
       </form>
+    </div>
+
+    <div class="auth-hint" style="margin-top:20px; border-top:1px solid var(--card-border); padding-top:14px;">
+      <a href="/terms.html" style="color:var(--muted);">Terms of Service</a> &middot; <a href="/privacy.html" style="color:var(--muted);">Privacy Policy</a>
     </div>
   </div>
 </div>
@@ -401,20 +413,24 @@
           </div>
         </div>
         <div>
-          <label class="field-label">Expiration date</label>
-          <input class="field-input" type="date" id="expInput">
+          <label class="field-label">Batches</label>
+          <div id="batchRows"></div>
+          <button type="button" id="addBatchRowBtn" style="margin-top:6px; background:none; border:none; color:var(--accent); font-size:12.5px; font-weight:600; padding:4px 0; display:flex; align-items:center; gap:4px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
+            Add another expiration date
+          </button>
         </div>
         <div class="row-2">
-          <div>
-            <label class="field-label">Quantity</label>
-            <input class="field-input mono" type="number" min="0" step="any" id="qtyInput" placeholder="0">
-          </div>
           <div>
             <label class="field-label">Unit</label>
             <select class="field-input" id="unitInput">
               <option>each</option><option>case</option><option>box</option><option>pallet</option>
               <option>lb</option><option>kg</option><option>oz</option><option>gal</option><option>L</option>
             </select>
+          </div>
+          <div>
+            <label class="field-label">Location on floor</label>
+            <input class="field-input" id="locInput" placeholder="e.g. Aisle 4, Shelf B">
           </div>
         </div>
         <div class="row-2">
@@ -434,10 +450,31 @@
           </div>
         </div>
         <div id="sizeAutoNote" style="display:none; font-size:12px; color:var(--ok-text); margin-top:-8px;"></div>
-        <div>
-          <label class="field-label">Location on floor</label>
-          <input class="field-input" id="locInput" placeholder="e.g. Aisle 4, Shelf B">
+        <div id="marketPriceNote" style="display:none; font-size:12px; color:var(--muted-2); margin-top:-8px;"></div>
+        <div class="row-2">
+          <div>
+            <label class="field-label">Cost price <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+            <div style="position:relative;">
+              <span style="position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:13px;">$</span>
+              <input class="field-input mono" type="number" min="0" step="any" id="costPriceInput" placeholder="0.00" style="padding-left:22px;">
+            </div>
+          </div>
+          <div>
+            <label class="field-label">Target margin</label>
+            <div style="position:relative;">
+              <input class="field-input mono" type="number" min="0" max="99" step="1" id="targetMarginInput" placeholder="50" value="50" style="padding-right:26px;">
+              <span style="position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:13px;">%</span>
+            </div>
+          </div>
         </div>
+        <div>
+          <label class="field-label">Selling price <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+          <div style="position:relative;">
+            <span style="position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:13px;">$</span>
+            <input class="field-input mono" type="number" min="0" step="any" id="sellingPriceInput" placeholder="0.00" style="padding-left:22px;">
+          </div>
+        </div>
+        <div id="priceSuggestNote" style="display:none; font-size:12px; color:var(--muted-2); margin-top:-8px;"></div>
         <div class="form-error" id="formError" style="display:none;"></div>
         <button type="submit" class="submit-btn" id="submitBtn">Add to floor</button>
       </form>
@@ -1354,6 +1391,11 @@
         ? `<span class="category-pill" style="background:${cat.color}22; color:${cat.color};"><span class="dot"></span>${esc(cat.name)}</span>`
         : '';
       const sizeLabel = it.sizeValue ? `<span class="tag-size">${esc(it.sizeValue)} ${esc(it.sizeUnit || '')}</span>` : '';
+      let priceLine = '';
+      if (it.sellingPrice) {
+        const marginPct = it.costPrice ? Math.round(((it.sellingPrice - it.costPrice) / it.sellingPrice) * 100) : null;
+        priceLine = `<div class="tag-price">$${Number(it.sellingPrice).toFixed(2)}${it.costPrice ? ` <span class="tag-price-cost">(cost $${Number(it.costPrice).toFixed(2)}${marginPct !== null ? `, ${marginPct}% margin` : ''})</span>` : ''}</div>`;
+      }
       return `
       <div class="tag-card">
         <div class="tag-band" style="background:${meta.band}"></div>
@@ -1367,6 +1409,7 @@
           </div>
           <div class="tag-upc">${esc(it.upc)} ${sizeLabel}</div>
           <div class="tag-loc">${locationPin()} ${esc(it.location)}</div>
+          ${priceLine}
           <div class="tag-bottom">
             <div>
               <div class="tag-date">${formatDate(it.expirationDate)}</div>
@@ -1382,6 +1425,7 @@
             <button type="button" class="del-btn" data-id="${it.id}">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
+
           </div>
         </div>
       </div>`;
@@ -1475,6 +1519,84 @@
   // ITEM MODAL / UPC LOOKUP / SCANNING
   // =====================================================================
 
+  // ---------- batch rows (multiple expiration dates in one add) ----------
+  let batchRowSeq = 0;
+
+  function batchRowHtml(rowId, expirationDate, quantity) {
+    return `
+      <div class="batch-entry-row" data-row-id="${rowId}">
+        <input class="field-input batch-exp" type="date" data-field="exp" value="${expirationDate ? esc(expirationDate) : ''}">
+        <input class="field-input mono batch-qty" type="number" min="0" step="any" placeholder="Qty" data-field="qty" value="${quantity !== undefined && quantity !== null ? esc(quantity) : ''}">
+        <button type="button" class="batch-entry-remove" data-remove-row="${rowId}">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>`;
+  }
+
+  function addBatchRow(expirationDate, quantity) {
+    batchRowSeq += 1;
+    const rowId = batchRowSeq;
+    document.getElementById('batchRows').insertAdjacentHTML('beforeend', batchRowHtml(rowId, expirationDate, quantity));
+    wireBatchRowRemove(rowId);
+    updateBatchRemoveVisibility();
+  }
+
+  function wireBatchRowRemove(rowId) {
+    const btn = document.querySelector(`[data-remove-row="${rowId}"]`);
+    if (btn) btn.addEventListener('click', () => {
+      const row = document.querySelector(`.batch-entry-row[data-row-id="${rowId}"]`);
+      if (row) row.remove();
+      updateBatchRemoveVisibility();
+    });
+  }
+
+  function updateBatchRemoveVisibility() {
+    const rows = document.querySelectorAll('.batch-entry-row');
+    document.querySelectorAll('.batch-entry-remove').forEach(btn => {
+      btn.style.visibility = rows.length > 1 ? 'visible' : 'hidden';
+    });
+  }
+
+  function resetBatchRows(expirationDate, quantity, allowMultiple) {
+    document.getElementById('batchRows').innerHTML = '';
+    addBatchRow(expirationDate || '', quantity !== undefined ? quantity : '');
+    document.getElementById('addBatchRowBtn').style.display = allowMultiple ? 'flex' : 'none';
+  }
+
+  function getBatchRows() {
+    return Array.from(document.querySelectorAll('.batch-entry-row')).map(row => ({
+      expirationDate: row.querySelector('[data-field="exp"]').value,
+      quantity: row.querySelector('[data-field="qty"]').value,
+    }));
+  }
+
+  document.getElementById('addBatchRowBtn').addEventListener('click', () => addBatchRow());
+
+  // ---------- price suggestion (target ~50% margin, editable) ----------
+  let sellingPriceManuallyEdited = false;
+
+  function applyPriceSuggestion() {
+    const costRaw = document.getElementById('costPriceInput').value;
+    const note = document.getElementById('priceSuggestNote');
+    if (costRaw === '' || Number(costRaw) < 0) { note.style.display = 'none'; return; }
+    const cost = Number(costRaw);
+    let marginRaw = document.getElementById('targetMarginInput').value;
+    let margin = marginRaw === '' ? 50 : Number(marginRaw);
+    if (!Number.isFinite(margin) || margin < 0) margin = 0;
+    if (margin > 95) margin = 95; // margins approaching 100% imply a near-zero cost basis, which breaks the math
+    // margin % = (price - cost) / price, so price = cost / (1 - margin)
+    const suggested = cost / (1 - margin / 100);
+    if (!sellingPriceManuallyEdited) {
+      document.getElementById('sellingPriceInput').value = suggested.toFixed(2);
+    }
+    note.textContent = `Suggested at a ${margin}% margin \u2014 adjust either field anytime.`;
+    note.style.display = 'block';
+  }
+
+  document.getElementById('costPriceInput').addEventListener('input', applyPriceSuggestion);
+  document.getElementById('targetMarginInput').addEventListener('input', applyPriceSuggestion);
+  document.getElementById('sellingPriceInput').addEventListener('input', () => { sellingPriceManuallyEdited = true; });
+
   function openModal(id) {
     editingId = id || null;
     const item = editingId ? items.find(i => i.id === editingId) : null;
@@ -1484,14 +1606,23 @@
     document.getElementById('editId').value = editingId || '';
     document.getElementById('upcInput').value = item ? item.upc : '';
     document.getElementById('nameInput').value = item ? item.name : '';
-    document.getElementById('expInput').value = item ? item.expirationDate : '';
-    document.getElementById('qtyInput').value = item ? item.quantity : '';
+    resetBatchRows(item ? item.expirationDate : '', item ? item.quantity : '', !item);
     document.getElementById('unitInput').value = item ? item.unit : 'each';
     document.getElementById('locInput').value = item ? item.location : '';
     populateCategorySelect();
     document.getElementById('categoryInput').value = item && item.categoryId ? item.categoryId : '';
     document.getElementById('sizeValueInput').value = item && item.sizeValue !== null && item.sizeValue !== undefined ? item.sizeValue : '';
     document.getElementById('sizeUnitInput').value = item && item.sizeUnit ? item.sizeUnit : '';
+    document.getElementById('costPriceInput').value = item && item.costPrice !== null && item.costPrice !== undefined ? item.costPrice : '';
+    document.getElementById('sellingPriceInput').value = item && item.sellingPrice !== null && item.sellingPrice !== undefined ? item.sellingPrice : '';
+    sellingPriceManuallyEdited = !!(item && item.sellingPrice);
+    if (item && item.costPrice && item.sellingPrice && item.sellingPrice > 0) {
+      document.getElementById('targetMarginInput').value = Math.round(((item.sellingPrice - item.costPrice) / item.sellingPrice) * 100);
+    } else {
+      document.getElementById('targetMarginInput').value = 50;
+    }
+    document.getElementById('priceSuggestNote').style.display = 'none';
+    document.getElementById('marketPriceNote').style.display = 'none';
     document.getElementById('sizeAutoNote').style.display = 'none';
     document.getElementById('inlineCategoryForm').style.display = 'none';
     document.getElementById('inlineCategoryName').value = '';
@@ -1517,22 +1648,30 @@
 
     const upc = document.getElementById('upcInput').value.trim();
     const name = document.getElementById('nameInput').value.trim();
-    const expirationDate = document.getElementById('expInput').value;
-    const quantityRaw = document.getElementById('qtyInput').value;
     const unit = document.getElementById('unitInput').value;
     const location = document.getElementById('locInput').value.trim();
     const categoryId = document.getElementById('categoryInput').value || null;
     const sizeValueRaw = document.getElementById('sizeValueInput').value;
     const sizeUnit = document.getElementById('sizeUnitInput').value || null;
+    const costPriceRaw = document.getElementById('costPriceInput').value;
+    const sellingPriceRaw = document.getElementById('sellingPriceInput').value;
+    const batches = getBatchRows();
     const errEl = document.getElementById('formError');
 
     let err = '';
     if (!upc) err = 'UPC is required.';
     else if (!name) err = 'Product name is required.';
-    else if (!expirationDate) err = 'Expiration date is required.';
-    else if (quantityRaw === '' || Number(quantityRaw) < 0) err = 'Enter a valid quantity.';
     else if (!location) err = 'Location is required.';
     else if (sizeValueRaw !== '' && Number(sizeValueRaw) < 0) err = 'Enter a valid size.';
+    else if (costPriceRaw !== '' && Number(costPriceRaw) < 0) err = 'Enter a valid cost price.';
+    else if (sellingPriceRaw !== '' && Number(sellingPriceRaw) < 0) err = 'Enter a valid selling price.';
+    else if (batches.length === 0) err = 'Add at least one expiration date.';
+    else {
+      for (const b of batches) {
+        if (!b.expirationDate) { err = 'Every batch needs an expiration date.'; break; }
+        if (b.quantity === '' || Number(b.quantity) < 0) { err = 'Every batch needs a valid quantity.'; break; }
+      }
+    }
 
     if (err) {
       errEl.textContent = err;
@@ -1541,10 +1680,12 @@
     }
     errEl.style.display = 'none';
 
-    const data = {
-      upc, name, expirationDate, quantity: Number(quantityRaw), unit, location, categoryId,
+    const sharedFields = {
+      upc, name, unit, location, categoryId,
       sizeValue: sizeValueRaw === '' ? null : Number(sizeValueRaw),
       sizeUnit: sizeValueRaw === '' ? null : sizeUnit,
+      costPrice: costPriceRaw === '' ? null : Number(costPriceRaw),
+      sellingPrice: sellingPriceRaw === '' ? null : Number(sellingPriceRaw),
     };
     const submitBtn = document.getElementById('submitBtn');
     const originalLabel = submitBtn.textContent;
@@ -1554,17 +1695,28 @@
 
     try {
       if (editingId) {
+        const data = { ...sharedFields, expirationDate: batches[0].expirationDate, quantity: Number(batches[0].quantity) };
         const updated = await apiRequest(`${API_BASE}/${editingId}`, {
           method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
         });
         items = items.map(i => i.id === editingId ? updated : i);
         showToast('Tag updated');
-      } else {
+      } else if (batches.length === 1) {
+        const data = { ...sharedFields, expirationDate: batches[0].expirationDate, quantity: Number(batches[0].quantity) };
         const created = await apiRequest(API_BASE, {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
         });
         items.push(created);
         showToast('Tag added to floor');
+      } else {
+        for (const b of batches) {
+          const data = { ...sharedFields, expirationDate: b.expirationDate, quantity: Number(b.quantity) };
+          const created = await apiRequest(API_BASE, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+          });
+          items.push(created);
+        }
+        showToast(`Added ${batches.length} batches to floor`);
       }
       renderAll();
       closeModal();
@@ -1611,9 +1763,18 @@
         } else {
           sizeAutoNote.style.display = 'none';
         }
+
+        const marketNote = document.getElementById('marketPriceNote');
+        if (result.marketPriceLow && result.marketPriceHigh) {
+          marketNote.textContent = `Typically sells for $${result.marketPriceLow.toFixed(2)}\u2013$${result.marketPriceHigh.toFixed(2)} elsewhere \u2014 a useful reference point.`;
+          marketNote.style.display = 'block';
+        } else {
+          marketNote.style.display = 'none';
+        }
       } else {
         note.classList.add('notfound');
         note.textContent = 'Product not found in database \u2014 enter the name manually.';
+        document.getElementById('marketPriceNote').style.display = 'none';
       }
     } catch (e) {
       hideLookupNote();

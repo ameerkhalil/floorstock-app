@@ -92,7 +92,9 @@ db.exec(`
     date_added TEXT NOT NULL,
     category_id TEXT,
     size_value REAL,
-    size_unit TEXT
+    size_unit TEXT,
+    cost_price REAL,
+    selling_price REAL
   );
 
   CREATE TABLE IF NOT EXISTS categories (
@@ -126,6 +128,8 @@ if (!itemCols.includes('store_id')) db.exec("ALTER TABLE items ADD COLUMN store_
 if (!itemCols.includes('category_id')) db.exec("ALTER TABLE items ADD COLUMN category_id TEXT");
 if (!itemCols.includes('size_value')) db.exec("ALTER TABLE items ADD COLUMN size_value REAL");
 if (!itemCols.includes('size_unit')) db.exec("ALTER TABLE items ADD COLUMN size_unit TEXT");
+if (!itemCols.includes('cost_price')) db.exec("ALTER TABLE items ADD COLUMN cost_price REAL");
+if (!itemCols.includes('selling_price')) db.exec("ALTER TABLE items ADD COLUMN selling_price REAL");
 
 const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
 if (!userCols.includes('email')) db.exec("ALTER TABLE users ADD COLUMN email TEXT");
@@ -647,7 +651,15 @@ app.get('/api/upc-lookup/:upc', requireAuth, requireActiveSubscription, async (r
       const item = data.items && data.items[0];
       if (item && item.title) {
         const size = parseSizeFromText(item.size || item.title);
-        return res.json({ found: true, name: item.title, brand: item.brand || null, sizeValue: size ? size.value : null, sizeUnit: size ? size.unit : null });
+        const priceLow = Number(item.lowest_recorded_price);
+        const priceHigh = Number(item.highest_recorded_price);
+        const hasMarketPrice = Number.isFinite(priceLow) && priceLow > 0 && Number.isFinite(priceHigh) && priceHigh > 0;
+        return res.json({
+          found: true, name: item.title, brand: item.brand || null,
+          sizeValue: size ? size.value : null, sizeUnit: size ? size.unit : null,
+          marketPriceLow: hasMarketPrice ? priceLow : null,
+          marketPriceHigh: hasMarketPrice ? priceHigh : null,
+        });
       }
     }
   } catch (e) {
@@ -674,11 +686,13 @@ function rowToItem(row) {
     categoryId: row.category_id || null,
     sizeValue: row.size_value === null || row.size_value === undefined ? null : row.size_value,
     sizeUnit: row.size_unit || null,
+    costPrice: row.cost_price === null || row.cost_price === undefined ? null : row.cost_price,
+    sellingPrice: row.selling_price === null || row.selling_price === undefined ? null : row.selling_price,
   };
 }
 
 function validatePayload(body) {
-  const { upc, name, expirationDate, quantity, unit, location, sizeValue, sizeUnit } = body || {};
+  const { upc, name, expirationDate, quantity, unit, location, sizeValue, sizeUnit, costPrice, sellingPrice } = body || {};
   if (!upc || typeof upc !== 'string' || !upc.trim()) return 'UPC is required.';
   if (!name || typeof name !== 'string' || !name.trim()) return 'Product name is required.';
   if (!expirationDate || typeof expirationDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(expirationDate)) {
@@ -694,6 +708,12 @@ function validatePayload(body) {
   }
   if (sizeUnit !== undefined && sizeUnit !== null && sizeUnit !== '' && typeof sizeUnit !== 'string') {
     return 'Invalid size unit.';
+  }
+  if (costPrice !== undefined && costPrice !== null && costPrice !== '' && (typeof costPrice !== 'number' || isNaN(costPrice) || costPrice < 0)) {
+    return 'Cost price must be a non-negative number.';
+  }
+  if (sellingPrice !== undefined && sellingPrice !== null && sellingPrice !== '' && (typeof sellingPrice !== 'number' || isNaN(sellingPrice) || sellingPrice < 0)) {
+    return 'Selling price must be a non-negative number.';
   }
   return null;
 }
@@ -720,14 +740,19 @@ app.get('/api/items/export.csv', requireAuth, requireActiveSubscription, (req, r
     const s = String(val === null || val === undefined ? '' : val);
     return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
-  const header = ['Product Name', 'UPC', 'Category', 'Size', 'Expiration Date', 'Quantity', 'Unit', 'Location', 'Date Added'];
+  const header = ['Product Name', 'UPC', 'Category', 'Size', 'Expiration Date', 'Quantity', 'Unit', 'Location', 'Cost Price', 'Selling Price', 'Margin %', 'Date Added'];
   const lines = [header.join(',')];
   for (const r of rows) {
     const categoryName = r.category_id ? (categories.get(r.category_id) || '') : '';
     const size = r.size_value ? `${r.size_value} ${r.size_unit || ''}`.trim() : '';
+    const marginPct = (r.cost_price && r.selling_price && r.selling_price > 0)
+      ? (((r.selling_price - r.cost_price) / r.selling_price) * 100).toFixed(1)
+      : '';
     lines.push([
       escapeCsv(r.name), escapeCsv(r.upc), escapeCsv(categoryName), escapeCsv(size), escapeCsv(r.expiration_date),
-      escapeCsv(r.quantity), escapeCsv(r.unit), escapeCsv(r.location), escapeCsv(r.date_added),
+      escapeCsv(r.quantity), escapeCsv(r.unit), escapeCsv(r.location),
+      escapeCsv(r.cost_price || ''), escapeCsv(r.selling_price || ''), escapeCsv(marginPct),
+      escapeCsv(r.date_added),
     ].join(','));
   }
   const csv = lines.join('\r\n');
@@ -742,16 +767,17 @@ app.post('/api/items', requireAuth, requireActiveSubscription, (req, res) => {
   const error = validatePayload(req.body);
   if (error) return res.status(400).json({ error });
 
-  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit } = req.body;
+  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit, costPrice, sellingPrice } = req.body;
   const id = newId();
   const dateAdded = nowIso();
 
   db.prepare(`
-    INSERT INTO items (id, store_id, upc, name, expiration_date, quantity, unit, location, date_added, category_id, size_value, size_unit)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO items (id, store_id, upc, name, expiration_date, quantity, unit, location, date_added, category_id, size_value, size_unit, cost_price, selling_price)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, req.auth.storeId, upc.trim(), name.trim(), expirationDate, quantity, unit.trim(), location.trim(), dateAdded,
-    categoryId || null, (sizeValue === '' || sizeValue === undefined) ? null : sizeValue, sizeUnit || null
+    categoryId || null, (sizeValue === '' || sizeValue === undefined) ? null : sizeValue, sizeUnit || null,
+    (costPrice === '' || costPrice === undefined) ? null : costPrice, (sellingPrice === '' || sellingPrice === undefined) ? null : sellingPrice
   );
 
   logAudit(req.auth.storeId, currentUsername(req), 'item_added', `Added ${quantity} ${unit.trim()} of "${name.trim()}" at ${location.trim()}`);
@@ -784,14 +810,15 @@ app.put('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) => 
   const error = validatePayload(req.body);
   if (error) return res.status(400).json({ error });
 
-  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit } = req.body;
+  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit, costPrice, sellingPrice } = req.body;
   db.prepare(`
     UPDATE items
-    SET upc = ?, name = ?, expiration_date = ?, quantity = ?, unit = ?, location = ?, category_id = ?, size_value = ?, size_unit = ?
+    SET upc = ?, name = ?, expiration_date = ?, quantity = ?, unit = ?, location = ?, category_id = ?, size_value = ?, size_unit = ?, cost_price = ?, selling_price = ?
     WHERE id = ? AND store_id = ?
   `).run(
     upc.trim(), name.trim(), expirationDate, quantity, unit.trim(), location.trim(),
     categoryId || null, (sizeValue === '' || sizeValue === undefined) ? null : sizeValue, sizeUnit || null,
+    (costPrice === '' || costPrice === undefined) ? null : costPrice, (sellingPrice === '' || sellingPrice === undefined) ? null : sellingPrice,
     req.params.id, req.auth.storeId
   );
 

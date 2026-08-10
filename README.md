@@ -41,6 +41,13 @@ database, and a browser frontend.
 - **Dashboard home view** — the top of the inventory screen now shows stat tiles (total
   tags, expired, critical, expiring soon, locations) and clickable category chips that
   filter the list below.
+- **Multiple expiration dates per add** — the New Tag form lets you add several
+  expiration-date/quantity batches for the same scanned product in one go (e.g. a
+  shipment with three different expiration dates), instead of repeating the whole form.
+- **Cost price, selling price, and a margin suggestion** — enter a cost price and the
+  form suggests a selling price at a 50% margin (standard "keystone" retail pricing),
+  which you can freely override. When available, a scanned product also shows a
+  "typically sells for $X–$Y" reference from market data.
 
 ### Important: existing data isn't tied to a store
 
