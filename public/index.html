@@ -977,40 +977,48 @@
       errEl.style.display = 'block';
       return;
     }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      errEl.textContent = 'This browser doesn\u2019t support camera access \u2014 enter the UPC manually below.';
+      errEl.style.display = 'block';
+      return;
+    }
 
-    try {
-      const video = document.getElementById('scanVideo');
-      video.classList.add('on');
-      scanning = true;
-      document.getElementById('scanBtn').classList.add('active');
-      document.getElementById('scanBtnLabel').textContent = 'Stop';
+    const video = document.getElementById('scanVideo');
+    video.classList.add('on');
+    scanning = true;
+    document.getElementById('scanBtn').classList.add('active');
+    document.getElementById('scanBtnLabel').textContent = 'Stop';
 
-      const hints = new Map();
-      hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
-        ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
-        ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
-        ZXing.BarcodeFormat.CODE_128,
-      ]);
-      zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.CODE_128,
+    ]);
+    zxingReader = new ZXing.BrowserMultiFormatReader(hints);
 
-      // Prefer the rear/environment camera on phones.
-      const devices = await ZXing.BrowserMultiFormatReader.listVideoInputDevices();
-      let deviceId = devices.length ? devices[devices.length - 1].deviceId : undefined;
-      const rear = devices.find(d => /back|rear|environment/i.test(d.label));
-      if (rear) deviceId = rear.deviceId;
+    // Ask for the camera directly (no device-listing step first) — on iOS Safari,
+    // any async step before getUserMedia can break the "this came from a tap"
+    // chain and cause the permission request to be silently blocked.
+    const constraints = { video: { facingMode: { ideal: 'environment' } } };
 
-      zxingReader.decodeFromVideoDevice(deviceId, video, (result, err) => {
-        if (result && scanning) {
-          document.getElementById('upcInput').value = result.getText();
-          lookupUpc(result.getText());
-          stopScan();
-        }
-      });
-    } catch (e) {
-      errEl.textContent = 'Camera access was blocked or unavailable \u2014 enter the UPC manually below.';
+    zxingReader.decodeFromConstraints(constraints, video, (result, err) => {
+      if (result && scanning) {
+        document.getElementById('upcInput').value = result.getText();
+        lookupUpc(result.getText());
+        stopScan();
+      }
+    }).catch((e) => {
+      let msg = 'Camera access was blocked or unavailable \u2014 enter the UPC manually below.';
+      if (e && e.name === 'NotAllowedError') {
+        msg = 'Camera permission was denied. On iPhone: Settings \u2192 Safari \u2192 Camera \u2192 Allow, or tap the \u201cAa\u201d icon in the address bar \u2192 Website Settings \u2192 Camera \u2192 Allow, then try again.';
+      } else if (e && e.name === 'NotFoundError') {
+        msg = 'No camera found on this device \u2014 enter the UPC manually below.';
+      }
+      errEl.textContent = msg;
       errEl.style.display = 'block';
       stopScan();
-    }
+    });
   }
 
   document.getElementById('scanBtn').addEventListener('click', () => { scanning ? stopScan() : startScan(); });
