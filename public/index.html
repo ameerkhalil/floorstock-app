@@ -380,6 +380,7 @@
         <button class="auth-tab active" id="mgrTabWorkers">Workers</button>
         <button class="auth-tab" id="mgrTabActivity">Activity</button>
         <button class="auth-tab" id="mgrTabDigest">Email digest</button>
+        <button class="auth-tab" id="mgrTabBilling">Billing</button>
       </div>
 
       <div id="mgrPaneWorkers" style="padding: 18px;">
@@ -411,6 +412,16 @@
         <div class="auth-error" id="digestError" style="display:none;"></div>
         <div id="digestSuccess" style="font-size:13px; color:var(--ok-text); margin-bottom:10px; display:none;"></div>
         <button type="button" class="add-worker-btn" id="sendTestDigestBtn">Send a test email now</button>
+      </div>
+
+      <div id="mgrPaneBilling" style="padding: 18px; display:none;">
+        <div class="section-label" style="margin-top:0;">FloorStock subscription</div>
+        <p style="font-size:13px; color:var(--muted-2); line-height:1.5; margin-top:0;">
+          Your subscription status is synced from Stripe. During setup, you can start checkout here if you have not subscribed yet.
+        </p>
+        <div id="billingStatusText" style="font-size:13.5px; font-weight:600; margin-bottom:12px;">Checking status…</div>
+        <div class="auth-error" id="billingError" style="display:none;"></div>
+        <button type="button" class="add-worker-btn" id="billingCheckoutBtn">Start subscription</button>
       </div>
     </div>
   </div>
@@ -544,7 +555,28 @@
       });
       currentUser = result;
       errEl.style.display = 'none';
-      enterApp();
+
+      // New managers go straight to Stripe Checkout. The account/session already
+      // exists, so returning from Stripe brings them back into FloorStock.
+      btn.textContent = 'Opening checkout…';
+      try {
+        const checkout = await apiRequest('/api/billing/create-checkout-session', { method: 'POST' });
+        if (!checkout || !checkout.url) throw new Error('Checkout did not return a URL.');
+        window.location.href = checkout.url;
+        return;
+      } catch (billingErr) {
+        // The store was successfully created. Let the manager into the app so
+        // they can retry checkout from Manage → Billing instead of re-registering.
+        enterApp();
+        setTimeout(() => {
+          document.getElementById('workersOverlay').classList.add('open');
+          switchMgrTab('billing');
+          const billingError = document.getElementById('billingError');
+          billingError.textContent = billingErr.message;
+          billingError.style.display = 'block';
+        }, 150);
+        return;
+      }
     } catch (err) {
       errEl.textContent = err.message;
       errEl.style.display = 'block';
@@ -571,6 +603,15 @@
       `${esc(currentUser.store.name)} <span class="role-badge">${esc(currentUser.role)}</span>`;
     document.getElementById('workersBtn').style.display = currentUser.role === 'manager' ? 'flex' : 'none';
     init();
+
+    const checkoutState = new URLSearchParams(window.location.search).get('checkout');
+    if (checkoutState === 'success') {
+      setTimeout(() => showToast('Payment completed — Stripe is syncing your subscription'), 250);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (checkoutState === 'cancelled') {
+      setTimeout(() => showToast('Checkout cancelled — you can restart it from Manage → Billing'), 250);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
   }
 
   async function checkExistingSession() {
@@ -601,14 +642,18 @@
     document.getElementById('mgrTabWorkers').classList.toggle('active', which === 'workers');
     document.getElementById('mgrTabActivity').classList.toggle('active', which === 'activity');
     document.getElementById('mgrTabDigest').classList.toggle('active', which === 'digest');
+    document.getElementById('mgrTabBilling').classList.toggle('active', which === 'billing');
     document.getElementById('mgrPaneWorkers').style.display = which === 'workers' ? 'block' : 'none';
     document.getElementById('mgrPaneActivity').style.display = which === 'activity' ? 'block' : 'none';
     document.getElementById('mgrPaneDigest').style.display = which === 'digest' ? 'block' : 'none';
+    document.getElementById('mgrPaneBilling').style.display = which === 'billing' ? 'block' : 'none';
     if (which === 'activity') loadActivity();
+    if (which === 'billing') loadBillingStatus();
   }
   document.getElementById('mgrTabWorkers').addEventListener('click', () => switchMgrTab('workers'));
   document.getElementById('mgrTabActivity').addEventListener('click', () => switchMgrTab('activity'));
   document.getElementById('mgrTabDigest').addEventListener('click', () => switchMgrTab('digest'));
+  document.getElementById('mgrTabBilling').addEventListener('click', () => switchMgrTab('billing'));
 
   async function openWorkersModal() {
     switchMgrTab('workers');
@@ -743,6 +788,50 @@
       showToast(err.message);
     }
   }
+
+  // =====================================================================
+  // BILLING (manager only)
+  // =====================================================================
+
+  async function loadBillingStatus() {
+    const statusEl = document.getElementById('billingStatusText');
+    const errEl = document.getElementById('billingError');
+    const btn = document.getElementById('billingCheckoutBtn');
+    errEl.style.display = 'none';
+    statusEl.textContent = 'Checking status…';
+
+    try {
+      const result = await apiRequest('/api/billing/status');
+      const label = (result.status || 'inactive').replace(/_/g, ' ');
+      statusEl.textContent = `Status: ${label}`;
+      statusEl.style.color = result.active ? 'var(--ok-text)' : 'var(--critical-text)';
+      btn.style.display = result.active ? 'none' : 'inline-block';
+    } catch (err) {
+      statusEl.textContent = 'Could not load subscription status.';
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    }
+  }
+
+  document.getElementById('billingCheckoutBtn').addEventListener('click', async () => {
+    const errEl = document.getElementById('billingError');
+    const btn = document.getElementById('billingCheckoutBtn');
+    errEl.style.display = 'none';
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Opening checkout…';
+
+    try {
+      const result = await apiRequest('/api/billing/create-checkout-session', { method: 'POST' });
+      if (!result || !result.url) throw new Error('Checkout did not return a URL.');
+      window.location.href = result.url;
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
 
   // =====================================================================
   // EMAIL DIGEST (manager only)
