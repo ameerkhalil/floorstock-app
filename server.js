@@ -25,6 +25,9 @@ const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
 const TRIAL_DAYS = Number.isFinite(Number(process.env.TRIAL_DAYS)) ? Number(process.env.TRIAL_DAYS) : 14;
 const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
+// UPC lookup config (free, optional — USDA's database is skipped if no key is set)
+const USDA_FDC_API_KEY = process.env.USDA_FDC_API_KEY || '';
+
 // Make sure the database's directory exists (e.g. a Render disk mount path
 // like /data) before trying to open it — otherwise better-sqlite3 throws and
 // the whole server crashes on boot instead of starting.
@@ -119,6 +122,22 @@ db.exec(`
     sent_date TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (store_id, sent_date)
+  );
+
+  -- Shared across every store: once any store's scan successfully identifies a
+  -- UPC, everyone benefits from that lookup forever, with no repeat external
+  -- API calls. Stretches free/limited lookup quotas a lot in practice, since
+  -- popular products (a Coke, a Red Bull...) get scanned by many stores.
+  CREATE TABLE IF NOT EXISTS upc_cache (
+    upc TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    brand TEXT,
+    size_value REAL,
+    size_unit TEXT,
+    market_price_low REAL,
+    market_price_high REAL,
+    source TEXT,
+    cached_at TEXT NOT NULL
   );
 `);
 
@@ -607,63 +626,140 @@ function parseSizeFromText(text) {
   return { value, unit };
 }
 
+// A 12-digit UPC-A and its 13-digit EAN-13 form (leading zero) are the same
+// product but different strings — try both so a format mismatch alone
+// doesn't cause a false "not found."
+function upcVariants(upc) {
+  const variants = [upc];
+  if (upc.length === 12) variants.push('0' + upc);
+  if (upc.length === 13 && upc.startsWith('0')) variants.push(upc.slice(1));
+  return variants;
+}
+
+function getCachedUpc(upc) {
+  const row = db.prepare('SELECT * FROM upc_cache WHERE upc = ?').get(upc);
+  if (!row) return null;
+  return {
+    found: true, name: row.name, brand: row.brand || null,
+    sizeValue: row.size_value, sizeUnit: row.size_unit,
+    marketPriceLow: row.market_price_low, marketPriceHigh: row.market_price_high,
+  };
+}
+
+function cacheUpcResult(upc, result) {
+  try {
+    db.prepare(`
+      INSERT INTO upc_cache (upc, name, brand, size_value, size_unit, market_price_low, market_price_high, source, cached_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ON CONFLICT(upc) DO UPDATE SET name=excluded.name, brand=excluded.brand, size_value=excluded.size_value,
+        size_unit=excluded.size_unit, market_price_low=excluded.market_price_low, market_price_high=excluded.market_price_high,
+        source=excluded.source, cached_at=excluded.cached_at
+    `).run(
+      upc, result.name, result.brand || null, result.sizeValue ?? null, result.sizeUnit || null,
+      result.marketPriceLow ?? null, result.marketPriceHigh ?? null, result.source || null, nowIso()
+    );
+  } catch (e) {
+    // caching is a nice-to-have — never let a cache write break the response
+  }
+}
+
+// Free, no key: huge global food/beverage coverage.
+async function lookupOpenFoodFacts(upc) {
+  try {
+    const res = await fetch(
+      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(upc)}.json`,
+      { headers: { 'User-Agent': 'FloorStock-InventoryApp/1.0' } }
+    );
+    if (!res.ok) return null;
+    const data = await res.json();
+    if (data.status !== 1 || !data.product) return null;
+    let name = (data.product.product_name || '').trim();
+    const brand = (data.product.brands || '').split(',')[0].trim();
+    if (brand && !name.toLowerCase().includes(brand.toLowerCase())) {
+      name = name ? `${brand} ${name}` : brand;
+    }
+    if (!name) return null;
+    let size = null;
+    if (data.product.product_quantity && data.product.product_quantity_unit) {
+      const unitRaw = String(data.product.product_quantity_unit).toLowerCase();
+      const normalized = unitRaw === 'ml' ? 'mL' : unitRaw === 'l' ? 'L' : unitRaw.includes('oz') ? 'oz' : unitRaw.includes('gal') ? 'gal' : null;
+      if (normalized) size = { value: parseFloat(data.product.product_quantity), unit: normalized };
+    }
+    if (!size) size = parseSizeFromText(data.product.quantity);
+    return { name, brand: brand || null, sizeValue: size ? size.value : null, sizeUnit: size ? size.unit : null, source: 'openfoodfacts' };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Free with a no-cost sign-up key: US government database, strong on branded
+// US packaged food/beverage products, including many regional/store brands.
+async function lookupUsda(upc) {
+  if (!USDA_FDC_API_KEY) return null;
+  try {
+    const url = `https://api.nal.usda.gov/fdc/v1/foods/search?api_key=${encodeURIComponent(USDA_FDC_API_KEY)}&query=${encodeURIComponent(upc)}&dataType=Branded&pageSize=5`;
+    const res = await fetch(url);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const normalizedUpc = upc.replace(/^0+/, '');
+    const match = (data.foods || []).find(f => f.gtinUpc && String(f.gtinUpc).replace(/^0+/, '') === normalizedUpc);
+    if (!match) return null;
+    let name = (match.description || '').trim();
+    const brand = (match.brandOwner || match.brandName || '').trim();
+    if (brand && name && !name.toLowerCase().includes(brand.toLowerCase())) {
+      name = `${brand} ${name}`;
+    }
+    if (!name) return null;
+    const size = match.packageWeight ? parseSizeFromText(match.packageWeight) : null;
+    return { name, brand: brand || null, sizeValue: size ? size.value : null, sizeUnit: size ? size.unit : null, source: 'usda' };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Free trial tier: shared 100 requests/day across the whole deployment, so
+// this is deliberately tried last, after the unlimited free sources.
+async function lookupUpcItemDb(upc) {
+  try {
+    const res = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(upc)}`);
+    if (!res.ok) return null;
+    const data = await res.json();
+    const item = data.items && data.items[0];
+    if (!item || !item.title) return null;
+    const size = parseSizeFromText(item.size || item.title);
+    const priceLow = Number(item.lowest_recorded_price);
+    const priceHigh = Number(item.highest_recorded_price);
+    const hasMarketPrice = Number.isFinite(priceLow) && priceLow > 0 && Number.isFinite(priceHigh) && priceHigh > 0;
+    return {
+      name: item.title, brand: item.brand || null,
+      sizeValue: size ? size.value : null, sizeUnit: size ? size.unit : null,
+      marketPriceLow: hasMarketPrice ? priceLow : null, marketPriceHigh: hasMarketPrice ? priceHigh : null,
+      source: 'upcitemdb',
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
 app.get('/api/upc-lookup/:upc', requireAuth, requireActiveSubscription, async (req, res) => {
   const upc = String(req.params.upc || '').trim();
   if (!upc) return res.status(400).json({ error: 'UPC is required.' });
 
-  // Primary: Open Food Facts — free, no key, reliable, huge food/beverage coverage.
-  try {
-    const offResponse = await fetch(
-      `https://world.openfoodfacts.org/api/v2/product/${encodeURIComponent(upc)}.json`,
-      { headers: { 'User-Agent': 'FloorStock-InventoryApp/1.0' } }
-    );
-    if (offResponse.ok) {
-      const offData = await offResponse.json();
-      if (offData.status === 1 && offData.product) {
-        let name = (offData.product.product_name || '').trim();
-        const brand = (offData.product.brands || '').split(',')[0].trim();
-        if (brand && !name.toLowerCase().includes(brand.toLowerCase())) {
-          name = name ? `${brand} ${name}` : brand;
-        }
-        // Try the structured quantity fields first, then fall back to the
-        // free-text "quantity" string (e.g. "500 ml", "2 L", "12 fl oz").
-        let size = null;
-        if (offData.product.product_quantity && offData.product.product_quantity_unit) {
-          const unitRaw = String(offData.product.product_quantity_unit).toLowerCase();
-          const normalized = unitRaw === 'ml' ? 'mL' : unitRaw === 'l' ? 'L' : unitRaw.includes('oz') ? 'oz' : unitRaw.includes('gal') ? 'gal' : null;
-          if (normalized) size = { value: parseFloat(offData.product.product_quantity), unit: normalized };
-        }
-        if (!size) size = parseSizeFromText(offData.product.quantity);
-        if (name) {
-          return res.json({ found: true, name, brand: brand || null, sizeValue: size ? size.value : null, sizeUnit: size ? size.unit : null });
-        }
-      }
-    }
-  } catch (e) {
-    // fall through to the secondary source
-  }
+  // Cache hit — instant, free, no external calls at all.
+  const cached = getCachedUpc(upc);
+  if (cached) return res.json(cached);
 
-  // Fallback: UPCitemdb trial — covers more non-food items, best effort only.
-  try {
-    const response = await fetch(`https://api.upcitemdb.com/prod/trial/lookup?upc=${encodeURIComponent(upc)}`);
-    if (response.ok) {
-      const data = await response.json();
-      const item = data.items && data.items[0];
-      if (item && item.title) {
-        const size = parseSizeFromText(item.size || item.title);
-        const priceLow = Number(item.lowest_recorded_price);
-        const priceHigh = Number(item.highest_recorded_price);
-        const hasMarketPrice = Number.isFinite(priceLow) && priceLow > 0 && Number.isFinite(priceHigh) && priceHigh > 0;
-        return res.json({
-          found: true, name: item.title, brand: item.brand || null,
-          sizeValue: size ? size.value : null, sizeUnit: size ? size.unit : null,
-          marketPriceLow: hasMarketPrice ? priceLow : null,
-          marketPriceHigh: hasMarketPrice ? priceHigh : null,
-        });
+  const variants = upcVariants(upc);
+  const sources = [lookupOpenFoodFacts, lookupUsda, lookupUpcItemDb];
+
+  for (const source of sources) {
+    for (const variant of variants) {
+      const result = await source(variant);
+      if (result) {
+        cacheUpcResult(upc, result); // cache under the originally scanned code
+        return res.json({ found: true, ...result });
       }
     }
-  } catch (e) {
-    // both sources failed — fall through to not-found
   }
 
   res.json({ found: false });
@@ -958,4 +1054,5 @@ app.listen(PORT, () => {
   console.log(`FloorStock server running at http://localhost:${PORT}`);
   console.log(`Database file: ${DB_PATH}`);
   console.log(RESEND_API_KEY ? `Digest email enabled (daily at ${DIGEST_HOUR_UTC}:00 UTC)` : 'Digest email disabled (no RESEND_API_KEY set)');
+  console.log(USDA_FDC_API_KEY ? 'USDA FoodData Central UPC source enabled' : 'USDA FoodData Central UPC source disabled (no USDA_FDC_API_KEY set)');
 });

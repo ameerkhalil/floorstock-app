@@ -233,12 +233,38 @@ on login/registration and required on the routes marked "auth".
 
 ## Notes on the UPC lookup
 
-It checks [Open Food Facts](https://world.openfoodfacts.org) first (free, no key, no
-rate limit worth worrying about, huge food/beverage coverage) and falls back to
-UPCitemdb's free trial tier for non-food items it doesn't have. Because Open Food Facts
-is food/beverage-focused, things like household goods, tobacco, or auto items may still
-come back "not found" — that's expected, and the form always accepts a manually typed
-name either way. If you want broader non-food coverage later, swapping in a paid lookup
-provider only requires editing the one function in `server.js` that calls these services
-(`/api/upc-lookup/:upc`) — the frontend doesn't need to change.
+Scanning a UPC checks, in order:
 
+1. **A shared cache** — if any store has ever successfully looked up this exact UPC
+   before, the result comes back instantly with no external API call at all. This
+   cache grows over time and meaningfully stretches free lookup quotas, since popular
+   products get scanned repeatedly across every store using the app.
+2. **[Open Food Facts](https://world.openfoodfacts.org)** — free, no key required, no
+   rate limit worth worrying about, huge global food/beverage coverage.
+3. **USDA FoodData Central** — free, US government database, strong on branded US
+   packaged food and beverage products. Requires a free API key (see below); the
+   source is simply skipped if you don't set one up.
+4. **UPCitemdb's free trial tier** — covers more non-food items, but is capped at 100
+   combined lookups per day, shared across every store using this deployment (not per
+   store). This is why it's tried last, after the two unlimited free sources above.
+
+Because coverage still leans food/beverage, things like household goods, tobacco, or
+auto parts may come back "not found" — that's expected, and the form always accepts a
+manually typed name either way.
+
+### Setting up the free USDA source (optional, no cost)
+
+1. Go to [fdc.nal.usda.gov/api-key-signup](https://fdc.nal.usda.gov/api-key-signup) and
+   request a free API key — no credit card, just an email address.
+2. In Render, add environment variable **Key** `USDA_FDC_API_KEY`, **Value** the key you
+   received.
+3. Redeploy. The startup logs will confirm whether it picked up the key.
+
+### If you outgrow the free sources
+
+If you eventually need broader non-food coverage or hit real limits with real volume,
+UPCitemdb's paid DEV plan ($99/month for 20,000 lookups/day at time of writing) uses the
+exact same database as the free tier — it just removes the shared rate limit. Swapping
+it in only requires changing the `lookupUpcItemDb` function in `server.js` to call the
+paid endpoint (`/prod/v1/lookup` with an API key header instead of `/prod/trial/lookup`)
+— the frontend and the rest of the lookup chain don't need to change.
