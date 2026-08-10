@@ -29,6 +29,9 @@ database, and a browser frontend.
   on phones, so it opens full-screen instead of living in a browser tab.
 - **Worker password reset** — managers can reset a worker's password from Manage →
   Workers without deleting and recreating the account.
+- **Paid subscriptions** — a 14-day free trial per store (no card required), then a flat
+  monthly subscription via Stripe. Managers can subscribe, update their card, or cancel
+  from Manage → Billing. Needs a one-time Stripe setup — see below.
 
 ### Important: existing data isn't tied to a store
 
@@ -109,6 +112,72 @@ emails/day, no credit card required.
 If `RESEND_API_KEY` is never set, the digest feature simply stays off — everything else
 in the app works the same either way.
 
+### Setting up billing (Stripe)
+
+Every new store gets a 14-day free trial automatically, no card required. After that,
+managers are prompted to subscribe — with a choice of **monthly** or **annual** billing.
+This needs a one-time Stripe setup:
+
+1. Create a free account at [stripe.com](https://stripe.com). No business details are
+   required to start in **test mode** — you can build and test the whole flow before
+   ever going live.
+2. In the Stripe dashboard, go to **Product catalog** → **Add product**. Name it
+   something like "FloorStock Subscription". Under pricing, add a **Recurring** price
+   with a **Monthly** billing period and save. Then, on that same product, click **Add
+   another price** and add a second **Recurring** price with a **Yearly** billing period
+   (typically discounted vs. 12x the monthly price, but that's up to you). Keeping both
+   prices on one product (rather than creating two separate products) keeps your catalog
+   simpler.
+3. Open each price and copy its **Price ID** (starts with `price_`) — you'll have two:
+   one for monthly, one for annual.
+4. Go to **Developers** → **API keys**. Copy the **Secret key** (starts with `sk_test_`
+   while in test mode).
+5. In Render, add these environment variables:
+   - **Key** `STRIPE_SECRET_KEY`, **Value** the secret key from step 4
+   - **Key** `STRIPE_PRICE_ID_MONTHLY`, **Value** the monthly price ID from step 3
+   - **Key** `STRIPE_PRICE_ID_ANNUAL`, **Value** the annual price ID from step 3
+   - (Only offering one billing period? Just set whichever one applies — the app only
+     shows a subscribe button for plans that have a price ID configured. The legacy
+     variable name `STRIPE_PRICE_ID` still works as the monthly price if you'd rather
+     not rename it.)
+6. Set up the webhook so Stripe can tell your app when someone pays. Stripe's dashboard
+   recently renamed this area to **Workbench** — webhooks live in its **Webhooks** tab
+   (`dashboard.stripe.com/webhooks`), and what used to be called a "webhook endpoint" is
+   now called an **event destination**:
+   - Go to `dashboard.stripe.com/webhooks` → **Create new destination**.
+   - Choose **Events on your account** (not Connected accounts).
+   - Select these event types: `checkout.session.completed`,
+     `customer.subscription.updated`, `customer.subscription.created`,
+     `customer.subscription.deleted`. Continue.
+   - Choose **Webhook** as the destination type. Endpoint URL:
+     `https://<your-render-url>/api/webhooks/stripe`. Create the destination.
+   - Open it and reveal the **Signing secret** (starts with `whsec_`).
+   - In Render, add environment variable **Key** `STRIPE_WEBHOOK_SECRET`, **Value** that
+     signing secret.
+7. Redeploy. Sign up a test store and try Manage → Billing — you should see both
+   "Subscribe monthly" and "Subscribe annually" buttons. In test mode, Stripe's checkout
+   accepts the card number `4242 4242 4242 4242` with any future expiry date and any
+   CVC.
+8. When you're ready to charge real cards, flip Stripe out of test mode (top-right
+   toggle in their dashboard), repeat steps 2–6 for **live mode** (live keys and
+   live prices are separate from test ones), and update the Render environment
+   variables with the live values.
+
+If `STRIPE_SECRET_KEY` is never set, billing stays off entirely and the app is fully
+usable without any trial limit — useful if you want to run it for your own store only,
+without charging anyone.
+
+**Changing the trial length or prices:** the trial length is controlled by the optional
+`TRIAL_DAYS` environment variable (defaults to 14). The prices themselves live entirely
+in Stripe — change the amount on the Price in Stripe's dashboard (Stripe recommends
+creating a new Price rather than editing an old one, since existing subscribers stay on
+whatever Price they signed up under unless you migrate them).
+
+**A note on handling your Stripe secret key:** treat `sk_test_...` / `sk_live_...`
+values as passwords — don't paste them anywhere outside Render's environment variable
+fields (not in chat, not in code, not in this README). If one ever gets exposed, roll it
+from Stripe's API keys page immediately; the old value stops working right away.
+
 ## API reference
 
 All endpoints are JSON (except the CSV export). Session cookie (`floorstock_sid`) is set
@@ -126,6 +195,11 @@ on login/registration and required on the routes marked "auth".
 | DELETE | `/api/workers/:id`            | manager  | Remove a worker login                      |
 | GET    | `/api/audit`                  | manager  | Recent activity log (last 200 entries)     |
 | POST   | `/api/digest/send-test`       | manager  | Send the manager a digest email right now  |
+| GET    | `/api/billing/status`         | any      | Current trial/subscription status          |
+| POST   | `/api/billing/create-checkout-session` | manager | Start a Stripe Checkout session; body `{ plan: "monthly" \| "annual" }` |
+| POST   | `/api/billing/create-portal-session`   | manager | Open Stripe's billing portal (update card, cancel) |
+| GET    | `/api/billing/confirm-checkout` | manager | Confirm a just-completed checkout immediately |
+| POST   | `/api/webhooks/stripe`        | —        | Stripe calls this; not for direct use      |
 | GET    | `/api/upc-lookup/:upc`        | any      | Look up a product name by UPC              |
 | GET    | `/api/items`                  | any      | List your store's items                    |
 | GET    | `/api/items/by-upc/:upc`      | any      | Find existing batches with this UPC        |

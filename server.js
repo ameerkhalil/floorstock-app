@@ -12,25 +12,34 @@ const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'floorstock.db');
 const SESSION_COOKIE = 'floorstock_sid';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-// Stripe billing config
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
-// Keep STRIPE_PRICE_ID as a backwards-compatible fallback for the annual plan.
-const STRIPE_MONTHLY_PRICE_ID = process.env.STRIPE_MONTHLY_PRICE_ID || '';
-const STRIPE_ANNUAL_PRICE_ID = process.env.STRIPE_ANNUAL_PRICE_ID || process.env.STRIPE_PRICE_ID || '';
-const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
-const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
-
 // Digest email config (all optional — digest simply won't send without an API key)
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
 const DIGEST_FROM_EMAIL = process.env.DIGEST_FROM_EMAIL || 'onboarding@resend.dev';
 const DIGEST_HOUR_UTC = Number.isFinite(Number(process.env.DIGEST_HOUR_UTC)) ? Number(process.env.DIGEST_HOUR_UTC) : 13; // ~8am US Eastern by default
+
+// Billing config (all optional — billing/paywall simply won't activate without a Stripe key)
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_PRICE_ID_MONTHLY = process.env.STRIPE_PRICE_ID_MONTHLY || process.env.STRIPE_PRICE_ID || '';
+const STRIPE_PRICE_ID_ANNUAL = process.env.STRIPE_PRICE_ID_ANNUAL || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const TRIAL_DAYS = Number.isFinite(Number(process.env.TRIAL_DAYS)) ? Number(process.env.TRIAL_DAYS) : 14;
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 // Make sure the database's directory exists (e.g. a Render disk mount path
 // like /data) before trying to open it — otherwise better-sqlite3 throws and
 // the whole server crashes on boot instead of starting.
 const dbDir = path.dirname(DB_PATH);
 if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
+  try {
+    fs.mkdirSync(dbDir, { recursive: true });
+  } catch (e) {
+    console.error(`\nCan't create or access "${dbDir}" for the database file.`);
+    console.error(`If DB_PATH points at a mounted disk (e.g. /data), check in your`);
+    console.error(`hosting dashboard that the disk is actually attached with that`);
+    console.error(`exact mount path — this error means it currently isn't.`);
+    console.error(`Underlying error: ${e.message}\n`);
+    process.exit(1);
+  }
 }
 
 const app = express();
@@ -44,9 +53,11 @@ db.exec(`
     name TEXT NOT NULL,
     address TEXT NOT NULL,
     created_at TEXT NOT NULL,
+    trial_ends_at TEXT,
+    subscription_status TEXT NOT NULL DEFAULT 'trialing',
     stripe_customer_id TEXT,
     stripe_subscription_id TEXT,
-    subscription_status TEXT NOT NULL DEFAULT 'inactive'
+    subscription_plan TEXT
   );
 
   CREATE TABLE IF NOT EXISTS users (
@@ -106,107 +117,32 @@ const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
 if (!userCols.includes('email')) db.exec("ALTER TABLE users ADD COLUMN email TEXT");
 
 const storeCols = db.prepare("PRAGMA table_info(stores)").all().map(c => c.name);
+if (!storeCols.includes('trial_ends_at')) db.exec("ALTER TABLE stores ADD COLUMN trial_ends_at TEXT");
+if (!storeCols.includes('subscription_status')) db.exec("ALTER TABLE stores ADD COLUMN subscription_status TEXT NOT NULL DEFAULT 'active'");
 if (!storeCols.includes('stripe_customer_id')) db.exec("ALTER TABLE stores ADD COLUMN stripe_customer_id TEXT");
 if (!storeCols.includes('stripe_subscription_id')) db.exec("ALTER TABLE stores ADD COLUMN stripe_subscription_id TEXT");
-if (!storeCols.includes('subscription_status')) db.exec("ALTER TABLE stores ADD COLUMN subscription_status TEXT DEFAULT 'inactive'");
+if (!storeCols.includes('subscription_plan')) db.exec("ALTER TABLE stores ADD COLUMN subscription_plan TEXT");
+// Stores that already existed before billing was added shouldn't suddenly get locked out.
+db.prepare("UPDATE stores SET subscription_status = 'active' WHERE subscription_status IS NULL OR subscription_status = ''").run();
 
-function applySubscriptionToStore(subscription, fallbackStoreId = null) {
-  if (!subscription) return;
+// ---------- Stripe webhook (needs the RAW body for signature verification,
+// so this is registered before express.json() touches the request) ----------
+app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) return res.status(400).send('Webhook not configured');
 
-  const subscriptionId = subscription.id || null;
-  const customerId = typeof subscription.customer === 'string'
-    ? subscription.customer
-    : (subscription.customer && subscription.customer.id) || null;
-  const status = subscription.status || 'inactive';
-  const storeId = (subscription.metadata && subscription.metadata.storeId) || fallbackStoreId || null;
-
-  if (storeId) {
-    db.prepare(`
-      UPDATE stores
-      SET stripe_customer_id = COALESCE(?, stripe_customer_id),
-          stripe_subscription_id = COALESCE(?, stripe_subscription_id),
-          subscription_status = ?
-      WHERE id = ?
-    `).run(customerId, subscriptionId, status, storeId);
-    return;
-  }
-
-  if (subscriptionId) {
-    const result = db.prepare(`
-      UPDATE stores
-      SET stripe_customer_id = COALESCE(?, stripe_customer_id),
-          subscription_status = ?
-      WHERE stripe_subscription_id = ?
-    `).run(customerId, status, subscriptionId);
-    if (result.changes > 0) return;
-  }
-
-  if (customerId) {
-    db.prepare(`
-      UPDATE stores
-      SET stripe_subscription_id = COALESCE(?, stripe_subscription_id),
-          subscription_status = ?
-      WHERE stripe_customer_id = ?
-    `).run(subscriptionId, status, customerId);
-  }
-}
-
-// =====================================================================
-// STRIPE WEBHOOK
-// IMPORTANT: This route must stay before express.json() so Stripe receives
-// the raw request body for signature verification.
-// =====================================================================
-app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
-  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
-    return res.status(500).send('Stripe is not configured.');
-  }
-
-  const signature = req.headers['stripe-signature'];
   let event;
-
   try {
-    event = stripe.webhooks.constructEvent(req.body, signature, STRIPE_WEBHOOK_SECRET);
+    event = stripe.webhooks.constructEvent(req.body, req.headers['stripe-signature'], STRIPE_WEBHOOK_SECRET);
   } catch (err) {
-    console.error('Stripe webhook signature verification failed:', err.message);
-    return res.status(400).send(`Webhook Error: ${err.message}`);
+    return res.status(400).send(`Webhook signature verification failed: ${err.message}`);
   }
 
   try {
-    switch (event.type) {
-      case 'checkout.session.completed': {
-        const session = event.data.object;
-        const storeId = session.metadata && session.metadata.storeId;
-
-        if (storeId && session.customer) {
-          const customerId = typeof session.customer === 'string' ? session.customer : session.customer.id;
-          db.prepare('UPDATE stores SET stripe_customer_id = ? WHERE id = ?').run(customerId, storeId);
-        }
-
-        if (storeId && session.subscription) {
-          const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
-          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
-          applySubscriptionToStore(subscription, storeId);
-          console.log(`Stripe checkout completed for store ${storeId} (${subscription.status})`);
-        }
-        break;
-      }
-
-      case 'customer.subscription.created':
-      case 'customer.subscription.updated':
-      case 'customer.subscription.deleted': {
-        applySubscriptionToStore(event.data.object);
-        break;
-      }
-
-      default:
-        break;
-    }
-
-    return res.json({ received: true });
-  } catch (err) {
-    console.error('Stripe webhook processing error:', err);
-    return res.status(500).send('Webhook processing failed.');
+    handleStripeEvent(event);
+  } catch (e) {
+    console.error('Error handling Stripe webhook event:', e);
   }
+  res.json({ received: true });
 });
 
 app.use(express.json());
@@ -300,6 +236,38 @@ function logAudit(storeId, actorUsername, action, summary) {
 }
 
 // =====================================================================
+// BILLING helpers
+// =====================================================================
+
+function billingSnapshot(store) {
+  const now = Date.now();
+  const trialEndsAt = store.trial_ends_at;
+  const trialActive = store.subscription_status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > now;
+  const paidActive = store.subscription_status === 'active';
+  const daysLeft = trialEndsAt ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - now) / 86400000)) : 0;
+  return {
+    status: store.subscription_status,
+    trialEndsAt: trialEndsAt || null,
+    trialDaysLeft: daysLeft,
+    active: paidActive || trialActive,
+    billingEnabled: !!stripe,
+    plansAvailable: { monthly: !!STRIPE_PRICE_ID_MONTHLY, annual: !!STRIPE_PRICE_ID_ANNUAL },
+    plan: store.subscription_plan || null,
+  };
+}
+
+function requireActiveSubscription(req, res, next) {
+  if (!stripe) return next(); // billing not configured on this deployment — never block
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
+  if (!store) return res.status(401).json({ error: 'Not signed in.' });
+  const snap = billingSnapshot(store);
+  if (!snap.active) {
+    return res.status(402).json({ error: 'Your free trial has ended. Ask your manager to subscribe to keep using FloorStock.', billing: snap });
+  }
+  next();
+}
+
+// =====================================================================
 // AUTH
 // =====================================================================
 
@@ -319,9 +287,10 @@ app.post('/api/auth/register-store', (req, res) => {
   const userId = newId();
   const passwordHash = bcrypt.hashSync(password, 10);
   const ts = nowIso();
+  const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  db.prepare('INSERT INTO stores (id, name, address, created_at) VALUES (?, ?, ?, ?)')
-    .run(storeId, storeName.trim(), storeAddress.trim(), ts);
+  db.prepare('INSERT INTO stores (id, name, address, created_at, trial_ends_at, subscription_status) VALUES (?, ?, ?, ?, ?, ?)')
+    .run(storeId, storeName.trim(), storeAddress.trim(), ts, trialEndsAt, 'trialing');
   db.prepare(`
     INSERT INTO users (id, store_id, username, password_hash, role, email, created_at)
     VALUES (?, ?, ?, ?, 'manager', ?, ?)
@@ -331,7 +300,12 @@ app.post('/api/auth/register-store', (req, res) => {
 
   const session = createSession({ id: userId, store_id: storeId, role: 'manager' });
   setSessionCookie(res, session.id, session.expiresAt);
-  res.status(201).json({ role: 'manager', username: username.trim().toLowerCase(), store: { id: storeId, name: storeName.trim(), address: storeAddress.trim() } });
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(storeId);
+  res.status(201).json({
+    role: 'manager', username: username.trim().toLowerCase(),
+    store: { id: storeId, name: storeName.trim(), address: storeAddress.trim() },
+    billing: billingSnapshot(store),
+  });
 });
 
 // Log in (manager or worker)
@@ -347,7 +321,7 @@ app.post('/api/auth/login', (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(user.store_id);
   const session = createSession(user);
   setSessionCookie(res, session.id, session.expiresAt);
-  res.json({ role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address } });
+  res.json({ role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address }, billing: billingSnapshot(store) });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -362,79 +336,7 @@ app.get('/api/auth/me', (req, res) => {
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.auth.userId);
   const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
   if (!user || !store) return res.json({ signedIn: false });
-  res.json({ signedIn: true, role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address } });
-});
-
-// =====================================================================
-// BILLING
-// =====================================================================
-
-app.get('/api/billing/status', requireAuth, (req, res) => {
-  const store = db.prepare(`
-    SELECT subscription_status, stripe_customer_id, stripe_subscription_id
-    FROM stores
-    WHERE id = ?
-  `).get(req.auth.storeId);
-
-  if (!store) return res.status(404).json({ error: 'Store not found.' });
-
-  res.json({
-    status: store.subscription_status || 'inactive',
-    active: ['active', 'trialing'].includes(store.subscription_status),
-    hasCustomer: Boolean(store.stripe_customer_id),
-    hasSubscription: Boolean(store.stripe_subscription_id),
-  });
-});
-
-app.post('/api/billing/create-checkout-session', requireManager, async (req, res) => {
-  if (!stripe) {
-    return res.status(500).json({ error: 'Stripe billing is not configured.' });
-  }
-
-  const plan = String((req.body && req.body.plan) || '').toLowerCase();
-  if (!['monthly', 'annual'].includes(plan)) {
-    return res.status(400).json({ error: 'Choose either the monthly or annual plan.' });
-  }
-
-  const priceId = plan === 'monthly' ? STRIPE_MONTHLY_PRICE_ID : STRIPE_ANNUAL_PRICE_ID;
-  if (!priceId) {
-    return res.status(500).json({
-      error: `${plan === 'monthly' ? 'Monthly' : 'Annual'} Stripe price is not configured.`
-    });
-  }
-
-  try {
-    const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
-    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.auth.userId);
-
-    if (!store || !user) return res.status(404).json({ error: 'Store account not found.' });
-
-    if (['active', 'trialing'].includes(store.subscription_status)) {
-      return res.status(409).json({ error: 'This store already has an active subscription.' });
-    }
-
-    const sessionOptions = {
-      mode: 'subscription',
-      line_items: [{ price: priceId, quantity: 1 }],
-      success_url: `${req.protocol}://${req.get('host')}/?checkout=success`,
-      cancel_url: `${req.protocol}://${req.get('host')}/?checkout=cancelled`,
-      client_reference_id: store.id,
-      metadata: { storeId: store.id, plan },
-      subscription_data: { metadata: { storeId: store.id, plan } },
-    };
-
-    if (store.stripe_customer_id) {
-      sessionOptions.customer = store.stripe_customer_id;
-    } else if (user.email) {
-      sessionOptions.customer_email = user.email;
-    }
-
-    const session = await stripe.checkout.sessions.create(sessionOptions);
-    return res.json({ url: session.url });
-  } catch (err) {
-    console.error('Checkout creation failed:', err);
-    return res.status(500).json({ error: 'Could not start checkout.' });
-  }
+  res.json({ signedIn: true, role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address }, billing: billingSnapshot(store) });
 });
 
 // =====================================================================
@@ -498,11 +400,131 @@ app.get('/api/audit', requireManager, (req, res) => {
 });
 
 // =====================================================================
+// BILLING (Stripe — flat monthly price per store, 14-day free trial)
+// =====================================================================
+
+app.get('/api/billing/status', requireAuth, (req, res) => {
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
+  res.json(billingSnapshot(store));
+});
+
+function appBaseUrl(req) {
+  return `${req.protocol}://${req.get('host')}`;
+}
+
+app.post('/api/billing/create-checkout-session', requireManager, async (req, res) => {
+  const plan = req.body && req.body.plan === 'annual' ? 'annual' : 'monthly';
+  const priceId = plan === 'annual' ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
+
+  if (!stripe || !priceId) return res.status(400).json({ error: `The ${plan} plan isn\u2019t configured on the server yet.` });
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
+  const manager = db.prepare('SELECT * FROM users WHERE id = ?').get(req.auth.userId);
+
+  try {
+    const session = await stripe.checkout.sessions.create({
+      mode: 'subscription',
+      line_items: [{ price: priceId, quantity: 1 }],
+      customer: store.stripe_customer_id || undefined,
+      customer_email: store.stripe_customer_id ? undefined : manager.email,
+      client_reference_id: store.id,
+      metadata: { storeId: store.id, plan },
+      subscription_data: { metadata: { storeId: store.id, plan } },
+      success_url: `${appBaseUrl(req)}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
+      cancel_url: `${appBaseUrl(req)}/?checkout=cancelled`,
+    });
+    res.json({ url: session.url });
+  } catch (e) {
+    res.status(502).json({ error: `Couldn\u2019t start checkout: ${e.message}` });
+  }
+});
+
+app.post('/api/billing/create-portal-session', requireManager, async (req, res) => {
+  if (!stripe) return res.status(400).json({ error: 'Billing isn\u2019t configured on the server yet.' });
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
+  if (!store.stripe_customer_id) return res.status(400).json({ error: 'No billing account on file yet \u2014 subscribe first.' });
+
+  try {
+    const session = await stripe.billingPortal.sessions.create({
+      customer: store.stripe_customer_id,
+      return_url: `${appBaseUrl(req)}/`,
+    });
+    res.json({ url: session.url });
+  } catch (e) {
+    res.status(502).json({ error: `Couldn\u2019t open billing portal: ${e.message}` });
+  }
+});
+
+// Called right after a successful Stripe Checkout redirect, so the UI can
+// unlock immediately instead of waiting on the webhook to arrive.
+app.get('/api/billing/confirm-checkout', requireManager, async (req, res) => {
+  if (!stripe) return res.status(400).json({ error: 'Billing isn\u2019t configured on the server yet.' });
+  const sessionId = req.query.session_id;
+  if (!sessionId) return res.status(400).json({ error: 'Missing session_id.' });
+
+  try {
+    const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['subscription'] });
+    if (session.client_reference_id !== req.auth.storeId) {
+      return res.status(403).json({ error: 'This checkout session doesn\u2019t belong to your store.' });
+    }
+    if (session.payment_status === 'paid' || (session.subscription && session.subscription.status === 'active')) {
+      applySubscriptionToStore(req.auth.storeId, session.customer, session.subscription, session.metadata && session.metadata.plan);
+    }
+    const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
+    res.json(billingSnapshot(store));
+  } catch (e) {
+    res.status(502).json({ error: `Couldn\u2019t confirm checkout: ${e.message}` });
+  }
+});
+
+function applySubscriptionToStore(storeId, stripeCustomerId, subscription, plan) {
+  const status = typeof subscription === 'string' ? 'active' : (subscription && subscription.status) || 'active';
+  const subscriptionId = typeof subscription === 'string' ? subscription : subscription && subscription.id;
+  const inferredPlan = plan || (subscription && subscription.metadata && subscription.metadata.plan) || null;
+  db.prepare(`
+    UPDATE stores SET stripe_customer_id = ?, stripe_subscription_id = ?, subscription_status = ?, subscription_plan = COALESCE(?, subscription_plan)
+    WHERE id = ?
+  `).run(stripeCustomerId || null, subscriptionId || null, status === 'active' || status === 'trialing' ? 'active' : status, inferredPlan, storeId);
+}
+
+function handleStripeEvent(event) {
+  switch (event.type) {
+    case 'checkout.session.completed': {
+      const session = event.data.object;
+      const storeId = session.client_reference_id || (session.metadata && session.metadata.storeId);
+      const plan = session.metadata && session.metadata.plan;
+      if (storeId) applySubscriptionToStore(storeId, session.customer, session.subscription, plan);
+      break;
+    }
+    case 'customer.subscription.updated':
+    case 'customer.subscription.created': {
+      const sub = event.data.object;
+      const storeId = sub.metadata && sub.metadata.storeId;
+      const plan = sub.metadata && sub.metadata.plan;
+      if (storeId) {
+        db.prepare('UPDATE stores SET subscription_status = ?, stripe_subscription_id = ?, subscription_plan = COALESCE(?, subscription_plan) WHERE id = ?')
+          .run(sub.status, sub.id, plan || null, storeId);
+      }
+      break;
+    }
+    case 'customer.subscription.deleted': {
+      const sub = event.data.object;
+      const storeId = sub.metadata && sub.metadata.storeId;
+      if (storeId) {
+        db.prepare("UPDATE stores SET subscription_status = 'canceled' WHERE id = ?").run(storeId);
+      }
+      break;
+    }
+    default:
+      break; // ignore anything we don't act on
+  }
+}
+
+// =====================================================================
 // UPC LOOKUP (free public database, proxied server-side to avoid CORS
 // and keep this swappable later without touching the frontend)
 // =====================================================================
 
-app.get('/api/upc-lookup/:upc', requireAuth, async (req, res) => {
+app.get('/api/upc-lookup/:upc', requireAuth, requireActiveSubscription, async (req, res) => {
   const upc = String(req.params.upc || '').trim();
   if (!upc) return res.status(400).json({ error: 'UPC is required.' });
 
@@ -578,14 +600,14 @@ function validatePayload(body) {
   return null;
 }
 
-app.get('/api/items', requireAuth, (req, res) => {
+app.get('/api/items', requireAuth, requireActiveSubscription, (req, res) => {
   const rows = db.prepare('SELECT * FROM items WHERE store_id = ? ORDER BY expiration_date ASC').all(req.auth.storeId);
   res.json(rows.map(rowToItem));
 });
 
 // Find existing batches with the same UPC, so the frontend can offer
 // "add to this batch" instead of always creating a new tag.
-app.get('/api/items/by-upc/:upc', requireAuth, (req, res) => {
+app.get('/api/items/by-upc/:upc', requireAuth, requireActiveSubscription, (req, res) => {
   const upc = String(req.params.upc || '').trim();
   if (!upc) return res.json([]);
   const rows = db.prepare('SELECT * FROM items WHERE store_id = ? AND upc = ? ORDER BY expiration_date ASC').all(req.auth.storeId, upc);
@@ -593,7 +615,7 @@ app.get('/api/items/by-upc/:upc', requireAuth, (req, res) => {
 });
 
 // CSV export of the current store's inventory
-app.get('/api/items/export.csv', requireAuth, (req, res) => {
+app.get('/api/items/export.csv', requireAuth, requireActiveSubscription, (req, res) => {
   const rows = db.prepare('SELECT * FROM items WHERE store_id = ? ORDER BY expiration_date ASC').all(req.auth.storeId);
   const escapeCsv = (val) => {
     const s = String(val === null || val === undefined ? '' : val);
@@ -615,7 +637,7 @@ app.get('/api/items/export.csv', requireAuth, (req, res) => {
   res.send(csv);
 });
 
-app.post('/api/items', requireAuth, (req, res) => {
+app.post('/api/items', requireAuth, requireActiveSubscription, (req, res) => {
   const error = validatePayload(req.body);
   if (error) return res.status(400).json({ error });
 
@@ -635,7 +657,7 @@ app.post('/api/items', requireAuth, (req, res) => {
 });
 
 // Add units to an existing batch (used by the "add to existing batch" flow)
-app.post('/api/items/:id/add-quantity', requireAuth, (req, res) => {
+app.post('/api/items/:id/add-quantity', requireAuth, requireActiveSubscription, (req, res) => {
   const existing = db.prepare('SELECT * FROM items WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
   if (!existing) return res.status(404).json({ error: 'Item not found.' });
 
@@ -651,7 +673,7 @@ app.post('/api/items/:id/add-quantity', requireAuth, (req, res) => {
   res.json(rowToItem(row));
 });
 
-app.put('/api/items/:id', requireAuth, (req, res) => {
+app.put('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) => {
   const existing = db.prepare('SELECT * FROM items WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
   if (!existing) return res.status(404).json({ error: 'Item not found.' });
 
@@ -671,7 +693,7 @@ app.put('/api/items/:id', requireAuth, (req, res) => {
   res.json(rowToItem(row));
 });
 
-app.delete('/api/items/:id', requireAuth, (req, res) => {
+app.delete('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) => {
   const existing = db.prepare('SELECT * FROM items WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
   if (!existing) return res.status(404).json({ error: 'Item not found.' });
   db.prepare('DELETE FROM items WHERE id = ?').run(req.params.id);
@@ -801,5 +823,4 @@ app.listen(PORT, () => {
   console.log(`FloorStock server running at http://localhost:${PORT}`);
   console.log(`Database file: ${DB_PATH}`);
   console.log(RESEND_API_KEY ? `Digest email enabled (daily at ${DIGEST_HOUR_UTC}:00 UTC)` : 'Digest email disabled (no RESEND_API_KEY set)');
-  console.log(stripe && (STRIPE_MONTHLY_PRICE_ID || STRIPE_ANNUAL_PRICE_ID) ? 'Stripe billing enabled' : 'Stripe billing disabled (missing Stripe secret key or price IDs)');
 });
