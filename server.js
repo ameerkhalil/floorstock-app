@@ -6,6 +6,7 @@ const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
 const Stripe = require('stripe');
+const rateLimit = require('express-rate-limit');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'floorstock.db');
@@ -139,6 +140,38 @@ db.exec(`
     source TEXT,
     cached_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS password_reset_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    expires_at TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+
+  -- One row per removed item, kept even after the item itself is deleted, so
+  -- the shrink report can show historical totals.
+  CREATE TABLE IF NOT EXISTS removals (
+    id TEXT PRIMARY KEY,
+    store_id TEXT NOT NULL,
+    item_name TEXT NOT NULL,
+    category_id TEXT,
+    quantity REAL NOT NULL,
+    unit TEXT NOT NULL,
+    cost_price REAL,
+    selling_price REAL,
+    expiration_date TEXT NOT NULL,
+    reason TEXT NOT NULL,
+    was_expired INTEGER NOT NULL,
+    removed_by TEXT,
+    removed_at TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS backup_log (
+    store_id TEXT NOT NULL,
+    sent_date TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (store_id, sent_date)
+  );
 `);
 
 // ---------- migrations for older deployments ----------
@@ -159,6 +192,10 @@ if (!storeCols.includes('subscription_status')) db.exec("ALTER TABLE stores ADD 
 if (!storeCols.includes('stripe_customer_id')) db.exec("ALTER TABLE stores ADD COLUMN stripe_customer_id TEXT");
 if (!storeCols.includes('stripe_subscription_id')) db.exec("ALTER TABLE stores ADD COLUMN stripe_subscription_id TEXT");
 if (!storeCols.includes('subscription_plan')) db.exec("ALTER TABLE stores ADD COLUMN subscription_plan TEXT");
+if (!storeCols.includes('digest_frequency')) db.exec("ALTER TABLE stores ADD COLUMN digest_frequency TEXT NOT NULL DEFAULT 'daily'");
+
+const digestLogCols = db.prepare("PRAGMA table_info(digest_log)").all().map(c => c.name);
+if (!digestLogCols.includes('emailed')) db.exec("ALTER TABLE digest_log ADD COLUMN emailed INTEGER NOT NULL DEFAULT 1");
 // Stores that already existed before billing was added shouldn't suddenly get locked out.
 db.prepare("UPDATE stores SET subscription_status = 'active' WHERE subscription_status IS NULL OR subscription_status = ''").run();
 
@@ -185,6 +222,23 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
 app.use(express.json());
 app.use(cookieParser());
 app.use(express.static(path.join(__dirname, 'public')));
+
+// ---------- rate limiting (basic brute-force / abuse protection) ----------
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, max: 15,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many attempts. Please wait a few minutes and try again.' },
+});
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, max: 8,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many attempts. Please wait a while and try again.' },
+});
+const forgotPasswordLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, max: 6,
+  standardHeaders: true, legacyHeaders: false,
+  message: { error: 'Too many attempts. Please wait a while and try again.' },
+});
 
 // ---------- helpers ----------
 function nowIso() { return new Date().toISOString(); }
@@ -309,7 +363,7 @@ function requireActiveSubscription(req, res, next) {
 // =====================================================================
 
 // Register a new store + its manager account
-app.post('/api/auth/register-store', (req, res) => {
+app.post('/api/auth/register-store', registerLimiter, (req, res) => {
   const { storeName, storeAddress, username, password, email } = req.body || {};
   if (!storeName || !String(storeName).trim()) return res.status(400).json({ error: 'Store name is required.' });
   if (!storeAddress || !String(storeAddress).trim()) return res.status(400).json({ error: 'Store address is required.' });
@@ -346,7 +400,7 @@ app.post('/api/auth/register-store', (req, res) => {
 });
 
 // Log in (manager or worker)
-app.post('/api/auth/login', (req, res) => {
+app.post('/api/auth/login', loginLimiter, (req, res) => {
   const { username, password } = req.body || {};
   if (!username || !password) return res.status(400).json({ error: 'Username and password are required.' });
 
@@ -374,6 +428,54 @@ app.get('/api/auth/me', (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
   if (!user || !store) return res.json({ signedIn: false });
   res.json({ signedIn: true, role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address }, billing: billingSnapshot(store) });
+});
+
+// Managers reset their own password via an emailed link (workers ask their
+// manager instead — see PUT /api/workers/:id/password).
+app.post('/api/auth/forgot-password', forgotPasswordLimiter, async (req, res) => {
+  const { email } = req.body || {};
+  // Always respond the same way whether or not the email matches an account,
+  // so this endpoint can't be used to discover which emails have accounts.
+  const genericResponse = { sent: true, message: 'If that email is on a manager account, a reset link is on its way.' };
+  if (!email || !isValidEmail(email)) return res.json(genericResponse);
+  if (!RESEND_API_KEY) return res.status(400).json({ error: 'Password reset email isn\u2019t configured on the server yet.' });
+
+  const user = db.prepare("SELECT * FROM users WHERE email = ? AND role = 'manager'").get(String(email).trim().toLowerCase());
+  if (user) {
+    const token = crypto.randomBytes(32).toString('hex');
+    const expiresAt = new Date(Date.now() + 60 * 60 * 1000).toISOString(); // 1 hour
+    db.prepare('INSERT INTO password_reset_tokens (token, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)')
+      .run(token, user.id, expiresAt, nowIso());
+    const resetUrl = `${appBaseUrl(req)}/?resetToken=${token}`;
+    await sendEmail({
+      to: user.email,
+      subject: 'Reset your FloorStock password',
+      html: `
+        <div style="font-family:Arial,sans-serif;color:#1C2530;max-width:480px;">
+          <h2>Reset your password</h2>
+          <p>Click the link below to set a new password for your FloorStock manager account. This link expires in 1 hour.</p>
+          <p><a href="${resetUrl}" style="background:#2D5F8A;color:#fff;padding:10px 18px;border-radius:6px;text-decoration:none;display:inline-block;">Reset password</a></p>
+          <p style="color:#8A97A3;font-size:13px;">If you didn\u2019t request this, you can safely ignore this email.</p>
+        </div>
+      `,
+    });
+  }
+  res.json(genericResponse);
+});
+
+app.post('/api/auth/reset-password', forgotPasswordLimiter, (req, res) => {
+  const { token, password } = req.body || {};
+  if (!token || !isStrongEnoughPassword(password)) {
+    return res.status(400).json({ error: 'A valid reset link and a password of at least 6 characters are required.' });
+  }
+  const row = db.prepare('SELECT * FROM password_reset_tokens WHERE token = ?').get(token);
+  if (!row || new Date(row.expires_at).getTime() < Date.now()) {
+    return res.status(400).json({ error: 'This reset link is invalid or has expired \u2014 request a new one.' });
+  }
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), row.user_id);
+  db.prepare('DELETE FROM password_reset_tokens WHERE token = ?').run(token);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.user_id); // sign out everywhere for safety
+  res.json({ success: true });
 });
 
 // =====================================================================
@@ -829,13 +931,14 @@ app.get('/api/items/by-upc/:upc', requireAuth, requireActiveSubscription, (req, 
 });
 
 // CSV export of the current store's inventory
-app.get('/api/items/export.csv', requireAuth, requireActiveSubscription, (req, res) => {
-  const rows = db.prepare('SELECT * FROM items WHERE store_id = ? ORDER BY expiration_date ASC').all(req.auth.storeId);
-  const categories = new Map(db.prepare('SELECT id, name FROM categories WHERE store_id = ?').all(req.auth.storeId).map(c => [c.id, c.name]));
-  const escapeCsv = (val) => {
-    const s = String(val === null || val === undefined ? '' : val);
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-  };
+function escapeCsvValue(val) {
+  const s = String(val === null || val === undefined ? '' : val);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function buildInventoryCsv(storeId) {
+  const rows = db.prepare('SELECT * FROM items WHERE store_id = ? ORDER BY expiration_date ASC').all(storeId);
+  const categories = new Map(db.prepare('SELECT id, name FROM categories WHERE store_id = ?').all(storeId).map(c => [c.id, c.name]));
   const header = ['Product Name', 'UPC', 'Category', 'Size', 'Expiration Date', 'Quantity', 'Unit', 'Location', 'Cost Price', 'Selling Price', 'Margin %', 'Date Added'];
   const lines = [header.join(',')];
   for (const r of rows) {
@@ -845,13 +948,17 @@ app.get('/api/items/export.csv', requireAuth, requireActiveSubscription, (req, r
       ? (((r.selling_price - r.cost_price) / r.selling_price) * 100).toFixed(1)
       : '';
     lines.push([
-      escapeCsv(r.name), escapeCsv(r.upc), escapeCsv(categoryName), escapeCsv(size), escapeCsv(r.expiration_date),
-      escapeCsv(r.quantity), escapeCsv(r.unit), escapeCsv(r.location),
-      escapeCsv(r.cost_price || ''), escapeCsv(r.selling_price || ''), escapeCsv(marginPct),
-      escapeCsv(r.date_added),
+      escapeCsvValue(r.name), escapeCsvValue(r.upc), escapeCsvValue(categoryName), escapeCsvValue(size), escapeCsvValue(r.expiration_date),
+      escapeCsvValue(r.quantity), escapeCsvValue(r.unit), escapeCsvValue(r.location),
+      escapeCsvValue(r.cost_price || ''), escapeCsvValue(r.selling_price || ''), escapeCsvValue(marginPct),
+      escapeCsvValue(r.date_added),
     ].join(','));
   }
-  const csv = lines.join('\r\n');
+  return lines.join('\r\n');
+}
+
+app.get('/api/items/export.csv', requireAuth, requireActiveSubscription, (req, res) => {
+  const csv = buildInventoryCsv(req.auth.storeId);
   const store = db.prepare('SELECT name FROM stores WHERE id = ?').get(req.auth.storeId);
   const filenameSafe = (store ? store.name : 'floorstock').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
   res.setHeader('Content-Type', 'text/csv');
@@ -927,9 +1034,58 @@ app.put('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) => 
 app.delete('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) => {
   const existing = db.prepare('SELECT * FROM items WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
   if (!existing) return res.status(404).json({ error: 'Item not found.' });
+
+  const rawReason = (req.body && req.body.reason) || 'other';
+  const reason = ['sold', 'expired', 'other'].includes(rawReason) ? rawReason : 'other';
+  const wasExpired = urgencyOf(existing.expiration_date) === 'expired';
+
   db.prepare('DELETE FROM items WHERE id = ?').run(req.params.id);
-  logAudit(req.auth.storeId, currentUsername(req), 'item_removed', `Removed "${existing.name}" (${existing.quantity} ${existing.unit}) from ${existing.location}`);
+  db.prepare(`
+    INSERT INTO removals (id, store_id, item_name, category_id, quantity, unit, cost_price, selling_price, expiration_date, reason, was_expired, removed_by, removed_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    newId(), req.auth.storeId, existing.name, existing.category_id, existing.quantity, existing.unit,
+    existing.cost_price, existing.selling_price, existing.expiration_date, reason, wasExpired ? 1 : 0,
+    currentUsername(req), nowIso()
+  );
+
+  logAudit(req.auth.storeId, currentUsername(req), 'item_removed', `Removed "${existing.name}" (${existing.quantity} ${existing.unit}) from ${existing.location} \u2014 ${reason}`);
   res.status(204).end();
+});
+
+// =====================================================================
+// SHRINK REPORT (manager only) — what got saved vs. lost, from removal history
+// =====================================================================
+
+app.get('/api/reports/shrink', requireManager, (req, res) => {
+  const days = Number(req.query.days) || 30;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const rows = db.prepare('SELECT * FROM removals WHERE store_id = ? AND removed_at >= ? ORDER BY removed_at DESC').all(req.auth.storeId, since);
+
+  let lostCost = 0, lostCount = 0;
+  let savedRevenue = 0, savedCost = 0, savedCount = 0;
+
+  for (const r of rows) {
+    const qty = r.quantity || 0;
+    if (r.reason === 'expired' || (r.reason === 'other' && r.was_expired)) {
+      lostCost += (r.cost_price || 0) * qty;
+      lostCount += 1;
+    } else if (r.reason === 'sold') {
+      savedRevenue += (r.selling_price || 0) * qty;
+      savedCost += (r.cost_price || 0) * qty;
+      savedCount += 1;
+    }
+  }
+
+  res.json({
+    days,
+    lostCost: Math.round(lostCost * 100) / 100,
+    lostCount,
+    savedRevenue: Math.round(savedRevenue * 100) / 100,
+    savedCost: Math.round(savedCost * 100) / 100,
+    savedCount,
+    totalRemovals: rows.length,
+  });
 });
 
 // =====================================================================
@@ -988,18 +1144,16 @@ function escapeHtml(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 
-async function sendDigestEmail(store, toEmail, alertItems) {
-  if (!RESEND_API_KEY || !toEmail) return { sent: false, reason: 'not configured' };
+// Generic email sender via Resend — used for the digest, password resets, and backups.
+async function sendEmail({ to, subject, html, attachments }) {
+  if (!RESEND_API_KEY || !to) return { sent: false, reason: 'not configured' };
   try {
+    const payload = { from: DIGEST_FROM_EMAIL, to: [to], subject, html };
+    if (attachments && attachments.length) payload.attachments = attachments;
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        from: DIGEST_FROM_EMAIL,
-        to: [toEmail],
-        subject: `FloorStock: ${alertItems.length} item${alertItems.length !== 1 ? 's' : ''} need attention at ${store.name}`,
-        html: buildDigestHtml(store, alertItems),
-      }),
+      body: JSON.stringify(payload),
     });
     if (!response.ok) {
       const body = await response.text().catch(() => '');
@@ -1009,6 +1163,14 @@ async function sendDigestEmail(store, toEmail, alertItems) {
   } catch (e) {
     return { sent: false, reason: e.message };
   }
+}
+
+async function sendDigestEmail(store, toEmail, alertItems) {
+  return sendEmail({
+    to: toEmail,
+    subject: `FloorStock: ${alertItems.length} item${alertItems.length !== 1 ? 's' : ''} need attention at ${store.name}`,
+    html: buildDigestHtml(store, alertItems),
+  });
 }
 
 // Manager can send a test digest immediately, regardless of schedule.
@@ -1024,7 +1186,29 @@ app.post('/api/digest/send-test', requireManager, async (req, res) => {
   res.json({ sent: true, itemCount: alertItems.length, to: user.email });
 });
 
-// Background scheduler: checks hourly, sends once per store per UTC day.
+const DIGEST_FREQUENCIES = ['daily', 'every_other_day', 'weekly', 'biweekly', 'monthly'];
+const DIGEST_FREQUENCY_DAYS = { daily: 1, every_other_day: 2, weekly: 7, biweekly: 14, monthly: 30 };
+
+app.get('/api/store/digest-frequency', requireManager, (req, res) => {
+  const store = db.prepare('SELECT digest_frequency FROM stores WHERE id = ?').get(req.auth.storeId);
+  res.json({ frequency: (store && store.digest_frequency) || 'daily' });
+});
+
+app.put('/api/store/digest-frequency', requireManager, (req, res) => {
+  const { frequency } = req.body || {};
+  if (!DIGEST_FREQUENCIES.includes(frequency)) return res.status(400).json({ error: 'Invalid frequency.' });
+  db.prepare('UPDATE stores SET digest_frequency = ? WHERE id = ?').run(frequency, req.auth.storeId);
+  res.json({ frequency });
+});
+
+function daysSinceLastDigest(storeId) {
+  const row = db.prepare('SELECT MAX(sent_date) as d FROM digest_log WHERE store_id = ? AND emailed = 1').get(storeId);
+  if (!row || !row.d) return Infinity;
+  return (Date.now() - new Date(row.d + 'T00:00:00Z').getTime()) / 86400000;
+}
+
+// Background scheduler: checks hourly, but each store only ever gets emailed
+// at most once per day, and no more often than its chosen frequency.
 function runDigestCheckIfDue() {
   if (!RESEND_API_KEY) return;
   const nowUtc = new Date();
@@ -1036,23 +1220,80 @@ function runDigestCheckIfDue() {
     const already = db.prepare('SELECT 1 FROM digest_log WHERE store_id = ? AND sent_date = ?').get(store.id, today);
     if (already) continue;
 
+    const requiredDays = DIGEST_FREQUENCY_DAYS[store.digest_frequency] || 1;
+    if (daysSinceLastDigest(store.id) < requiredDays) {
+      db.prepare('INSERT OR IGNORE INTO digest_log (store_id, sent_date, created_at, emailed) VALUES (?, ?, ?, 0)').run(store.id, today, nowIso());
+      continue;
+    }
+
     const manager = db.prepare("SELECT * FROM users WHERE store_id = ? AND role = 'manager' LIMIT 1").get(store.id);
-    db.prepare('INSERT OR IGNORE INTO digest_log (store_id, sent_date, created_at) VALUES (?, ?, ?)').run(store.id, today, nowIso());
-
-    if (!manager || !manager.email) continue;
     const alertItems = getAlertItemsForStore(store.id);
-    if (alertItems.length === 0) continue; // nothing worth emailing about today
-
-    sendDigestEmail(store, manager.email, alertItems).catch(() => {});
+    const willSend = !!(manager && manager.email && alertItems.length > 0);
+    db.prepare('INSERT OR IGNORE INTO digest_log (store_id, sent_date, created_at, emailed) VALUES (?, ?, ?, ?)').run(store.id, today, nowIso(), willSend ? 1 : 0);
+    if (willSend) sendDigestEmail(store, manager.email, alertItems).catch(() => {});
   }
 }
 setInterval(runDigestCheckIfDue, 60 * 60 * 1000); // hourly check
+
+// =====================================================================
+// AUTOMATED WEEKLY BACKUP EMAIL (per store — a portable copy of your data,
+// not a substitute for real infrastructure-level backups of the whole
+// database; see README for that distinction)
+// =====================================================================
+
+async function sendBackupEmail(store, toEmail) {
+  const csv = buildInventoryCsv(store.id);
+  const csvBase64 = Buffer.from(csv, 'utf8').toString('base64');
+  const dateStr = todayUtcDateStr();
+  return sendEmail({
+    to: toEmail,
+    subject: `FloorStock backup \u2014 ${store.name} \u2014 ${dateStr}`,
+    html: `
+      <div style="font-family:Arial,sans-serif;color:#1C2530;max-width:480px;">
+        <h2 style="margin-bottom:4px;">Your FloorStock backup</h2>
+        <p style="color:#666;">Attached is a CSV snapshot of ${escapeHtml(store.name)}'s current inventory, generated ${escapeHtml(dateStr)}. Keep it somewhere safe as a portable copy of your data.</p>
+      </div>
+    `,
+    attachments: [{ filename: `${store.name.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}-backup-${dateStr}.csv`, content: csvBase64 }],
+  });
+}
+
+app.post('/api/backup/send-test', requireManager, async (req, res) => {
+  const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.auth.userId);
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
+  if (!user.email) return res.status(400).json({ error: 'No email on file for your manager account.' });
+  if (!RESEND_API_KEY) return res.status(400).json({ error: 'Email sending isn\u2019t configured on the server yet (missing RESEND_API_KEY).' });
+
+  const result = await sendBackupEmail(store, user.email);
+  if (!result.sent) return res.status(502).json({ error: `Couldn\u2019t send: ${result.reason}` });
+  res.json({ sent: true, to: user.email });
+});
+
+function runBackupCheckIfDue() {
+  if (!RESEND_API_KEY) return;
+  const nowUtc = new Date();
+  if (nowUtc.getUTCHours() !== DIGEST_HOUR_UTC) return; // piggyback on the same hour as the digest
+
+  const today = todayUtcDateStr();
+  const stores = db.prepare('SELECT * FROM stores').all();
+  for (const store of stores) {
+    const row = db.prepare('SELECT MAX(sent_date) as d FROM backup_log WHERE store_id = ?').get(store.id);
+    const daysSince = (!row || !row.d) ? Infinity : (Date.now() - new Date(row.d + 'T00:00:00Z').getTime()) / 86400000;
+    if (daysSince < 7) continue; // weekly cadence, fixed
+
+    const manager = db.prepare("SELECT * FROM users WHERE store_id = ? AND role = 'manager' LIMIT 1").get(store.id);
+    db.prepare('INSERT OR IGNORE INTO backup_log (store_id, sent_date, created_at) VALUES (?, ?, ?)').run(store.id, today, nowIso());
+    if (manager && manager.email) sendBackupEmail(store, manager.email).catch(() => {});
+  }
+}
+setInterval(runBackupCheckIfDue, 60 * 60 * 1000); // hourly check
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
 
 app.listen(PORT, () => {
   console.log(`FloorStock server running at http://localhost:${PORT}`);
   console.log(`Database file: ${DB_PATH}`);
-  console.log(RESEND_API_KEY ? `Digest email enabled (daily at ${DIGEST_HOUR_UTC}:00 UTC)` : 'Digest email disabled (no RESEND_API_KEY set)');
+  console.log(RESEND_API_KEY ? `Digest email enabled (checks hourly, sends at ${DIGEST_HOUR_UTC}:00 UTC per store's chosen frequency)` : 'Digest email disabled (no RESEND_API_KEY set)');
+  console.log(RESEND_API_KEY ? 'Weekly per-store backup email enabled' : 'Weekly per-store backup email disabled (no RESEND_API_KEY set)');
   console.log(USDA_FDC_API_KEY ? 'USDA FoodData Central UPC source enabled' : 'USDA FoodData Central UPC source disabled (no USDA_FDC_API_KEY set)');
 });

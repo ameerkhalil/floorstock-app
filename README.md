@@ -21,14 +21,15 @@ database, and a browser frontend.
   creating a new separate tag.
 - **Activity log** — every add/edit/remove/restock and worker change is recorded with
   who did it and when, visible to managers under Manage → Activity.
-- **Daily email digest** — once a day, managers get an email listing everything expired,
-  critical, or expiring soon. Nothing sends if there's nothing to flag. Needs a one-time
-  email service setup — see below.
+- **Configurable expiration email frequency** — daily, every other day, weekly,
+  every 2 weeks, or monthly. Managers pick from Manage → Email digest. Nothing sends if
+  there's nothing to flag, regardless of how often it's checked.
 - **CSV export** — the "Export" button downloads the current store's full inventory.
 - **Home screen install** — the app has a proper icon and name for "Add to Home Screen"
   on phones, so it opens full-screen instead of living in a browser tab.
-- **Worker password reset** — managers can reset a worker's password from Manage →
-  Workers without deleting and recreating the account.
+- **Manager and worker password reset** — workers get reset by their manager from
+  Manage → Workers; managers reset their own via an emailed link from the sign-in
+  screen's "Forgot password?" link.
 - **Paid subscriptions** — a 14-day free trial per store (no card required), then a flat
   monthly or annual subscription via Stripe. Managers can subscribe, update their card,
   or cancel from Manage → Billing. Needs a one-time Stripe setup — see below.
@@ -44,15 +45,38 @@ database, and a browser frontend.
 - **Multiple expiration dates per add** — the New Tag form lets you add several
   expiration-date/quantity batches for the same scanned product in one go (e.g. a
   shipment with three different expiration dates), instead of repeating the whole form.
-- **Cost price, selling price, and a margin suggestion** — enter a cost price and the
-  form suggests a selling price at a 50% margin (standard "keystone" retail pricing),
-  which you can freely override. When available, a scanned product also shows a
-  "typically sells for $X–$Y" reference from market data.
+- **Cost price, selling price, and a margin suggestion** — enter a cost price and pick a
+  target margin (defaults to 50%, the standard "keystone" retail benchmark, but you can
+  set any percentage) and the selling price is suggested automatically, fully editable.
+  When available, a scanned product also shows a "typically sells for $X–$Y" reference
+  from market data.
+- **Shrink report** — pick a reason (Sold / Expired / Other) each time you remove a tag,
+  and Manage → Reports shows money lost to expiration vs. revenue and profit from items
+  sold before they expired, over a selectable time period.
+- **Automated weekly backup email** — every store's manager automatically gets a CSV
+  snapshot of their inventory emailed weekly, as a portable copy of their data. This is
+  *not* a substitute for real infrastructure-level backup of the whole database — see
+  the note in "Data safety" below.
+- **A public-facing landing intro** — the sign-in screen now leads with what the product
+  does and its key features, for first-time visitors, not just a bare login form.
+- **Basic rate limiting** — login, signup, and password-reset endpoints are throttled
+  per IP to make brute-force guessing impractical.
 
 ### Important: existing data isn't tied to a store
 
 If you had test items in the app before store accounts existed, they aren't associated
 with any store and won't show up. Sign up as a manager and re-add them.
+
+### Data safety: what the automated backup does and doesn't cover
+
+The weekly backup email gives each manager a portable CSV of their own store's
+inventory — useful if you ever want your data outside the app, or as a sanity check.
+It does **not** protect the underlying database file itself (accounts, worker logins,
+billing state, all stores at once) against corruption or disk loss. For that, you'd
+want either Render's own disk snapshot feature (check current availability/pricing on
+your plan) or a scheduled export of the whole SQLite file to external storage — a
+reasonable next step if this becomes business-critical, but out of scope for what's
+built here today.
 
 
 ## What's inside
@@ -205,16 +229,22 @@ on login/registration and required on the routes marked "auth".
 | POST   | `/api/auth/login`             | —        | Sign in as manager or worker               |
 | POST   | `/api/auth/logout`            | —        | End the session                            |
 | GET    | `/api/auth/me`                | —        | Current session info, if any               |
+| POST   | `/api/auth/forgot-password`   | —        | Email a manager a password reset link      |
+| POST   | `/api/auth/reset-password`    | —        | Set a new password using a reset token     |
 | GET    | `/api/workers`                | manager  | List worker logins for your store          |
 | POST   | `/api/workers`                | manager  | Create a worker login                      |
 | PUT    | `/api/workers/:id/password`   | manager  | Reset a worker's password                  |
 | DELETE | `/api/workers/:id`            | manager  | Remove a worker login                      |
 | GET    | `/api/audit`                  | manager  | Recent activity log (last 200 entries)     |
+| GET    | `/api/reports/shrink`         | manager  | Money lost/saved from removals; query `?days=30` |
 | GET    | `/api/categories`             | any      | List your store's categories               |
 | POST   | `/api/categories`             | manager  | Create a category; body `{ name, color }` (color is `#rrggbb`) |
 | PUT    | `/api/categories/:id`         | manager  | Update a category's name/color             |
 | DELETE | `/api/categories/:id`         | manager  | Remove a category (items keep their other data, category just clears) |
+| GET    | `/api/store/digest-frequency` | manager  | Current email frequency setting            |
+| PUT    | `/api/store/digest-frequency` | manager  | Update it; body `{ frequency }` (daily/every_other_day/weekly/biweekly/monthly) |
 | POST   | `/api/digest/send-test`       | manager  | Send the manager a digest email right now  |
+| POST   | `/api/backup/send-test`       | manager  | Send the manager a backup email right now  |
 | GET    | `/api/billing/status`         | any      | Current trial/subscription status          |
 | POST   | `/api/billing/create-checkout-session` | manager | Start a Stripe Checkout session; body `{ plan: "monthly" \| "annual" }` |
 | POST   | `/api/billing/create-portal-session`   | manager | Open Stripe's billing portal (update card, cancel) |
@@ -227,7 +257,7 @@ on login/registration and required on the routes marked "auth".
 | POST   | `/api/items`                  | any      | Create an item                             |
 | POST   | `/api/items/:id/add-quantity` | any      | Add units to an existing batch             |
 | PUT    | `/api/items/:id`              | any      | Update an item                             |
-| DELETE | `/api/items/:id`              | any      | Delete an item                             |
+| DELETE | `/api/items/:id`              | any      | Delete an item; body `{ reason }` (sold/expired/other) |
 
 `expirationDate` is `YYYY-MM-DD`. `quantity` is a non-negative number.
 
