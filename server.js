@@ -5,11 +5,18 @@ const crypto = require('crypto');
 const cookieParser = require('cookie-parser');
 const bcrypt = require('bcryptjs');
 const Database = require('better-sqlite3');
+const Stripe = require('stripe');
 
 const PORT = process.env.PORT || 3000;
 const DB_PATH = process.env.DB_PATH || path.join(__dirname, 'floorstock.db');
 const SESSION_COOKIE = 'floorstock_sid';
 const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
+
+// Stripe billing config
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || '';
+const STRIPE_PRICE_ID = process.env.STRIPE_PRICE_ID || '';
+const STRIPE_WEBHOOK_SECRET = process.env.STRIPE_WEBHOOK_SECRET || '';
+const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 
 // Digest email config (all optional — digest simply won't send without an API key)
 const RESEND_API_KEY = process.env.RESEND_API_KEY || '';
@@ -34,7 +41,10 @@ db.exec(`
     id TEXT PRIMARY KEY,
     name TEXT NOT NULL,
     address TEXT NOT NULL,
-    created_at TEXT NOT NULL
+    created_at TEXT NOT NULL,
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    subscription_status TEXT NOT NULL DEFAULT 'inactive'
   );
 
   CREATE TABLE IF NOT EXISTS users (
@@ -92,6 +102,110 @@ if (!itemCols.includes('store_id')) db.exec("ALTER TABLE items ADD COLUMN store_
 
 const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
 if (!userCols.includes('email')) db.exec("ALTER TABLE users ADD COLUMN email TEXT");
+
+const storeCols = db.prepare("PRAGMA table_info(stores)").all().map(c => c.name);
+if (!storeCols.includes('stripe_customer_id')) db.exec("ALTER TABLE stores ADD COLUMN stripe_customer_id TEXT");
+if (!storeCols.includes('stripe_subscription_id')) db.exec("ALTER TABLE stores ADD COLUMN stripe_subscription_id TEXT");
+if (!storeCols.includes('subscription_status')) db.exec("ALTER TABLE stores ADD COLUMN subscription_status TEXT DEFAULT 'inactive'");
+
+function applySubscriptionToStore(subscription, fallbackStoreId = null) {
+  if (!subscription) return;
+
+  const subscriptionId = subscription.id || null;
+  const customerId = typeof subscription.customer === 'string'
+    ? subscription.customer
+    : (subscription.customer && subscription.customer.id) || null;
+  const status = subscription.status || 'inactive';
+  const storeId = (subscription.metadata && subscription.metadata.storeId) || fallbackStoreId || null;
+
+  if (storeId) {
+    db.prepare(`
+      UPDATE stores
+      SET stripe_customer_id = COALESCE(?, stripe_customer_id),
+          stripe_subscription_id = COALESCE(?, stripe_subscription_id),
+          subscription_status = ?
+      WHERE id = ?
+    `).run(customerId, subscriptionId, status, storeId);
+    return;
+  }
+
+  if (subscriptionId) {
+    const result = db.prepare(`
+      UPDATE stores
+      SET stripe_customer_id = COALESCE(?, stripe_customer_id),
+          subscription_status = ?
+      WHERE stripe_subscription_id = ?
+    `).run(customerId, status, subscriptionId);
+    if (result.changes > 0) return;
+  }
+
+  if (customerId) {
+    db.prepare(`
+      UPDATE stores
+      SET stripe_subscription_id = COALESCE(?, stripe_subscription_id),
+          subscription_status = ?
+      WHERE stripe_customer_id = ?
+    `).run(subscriptionId, status, customerId);
+  }
+}
+
+// =====================================================================
+// STRIPE WEBHOOK
+// IMPORTANT: This route must stay before express.json() so Stripe receives
+// the raw request body for signature verification.
+// =====================================================================
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  if (!stripe || !STRIPE_WEBHOOK_SECRET) {
+    return res.status(500).send('Stripe is not configured.');
+  }
+
+  const signature = req.headers['stripe-signature'];
+  let event;
+
+  try {
+    event = stripe.webhooks.constructEvent(req.body, signature, STRIPE_WEBHOOK_SECRET);
+  } catch (err) {
+    console.error('Stripe webhook signature verification failed:', err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    switch (event.type) {
+      case 'checkout.session.completed': {
+        const session = event.data.object;
+        const storeId = session.metadata && session.metadata.storeId;
+
+        if (storeId && session.customer) {
+          const customerId = typeof session.customer === 'string' ? session.customer : session.customer.id;
+          db.prepare('UPDATE stores SET stripe_customer_id = ? WHERE id = ?').run(customerId, storeId);
+        }
+
+        if (storeId && session.subscription) {
+          const subscriptionId = typeof session.subscription === 'string' ? session.subscription : session.subscription.id;
+          const subscription = await stripe.subscriptions.retrieve(subscriptionId);
+          applySubscriptionToStore(subscription, storeId);
+          console.log(`Stripe checkout completed for store ${storeId} (${subscription.status})`);
+        }
+        break;
+      }
+
+      case 'customer.subscription.created':
+      case 'customer.subscription.updated':
+      case 'customer.subscription.deleted': {
+        applySubscriptionToStore(event.data.object);
+        break;
+      }
+
+      default:
+        break;
+    }
+
+    return res.json({ received: true });
+  } catch (err) {
+    console.error('Stripe webhook processing error:', err);
+    return res.status(500).send('Webhook processing failed.');
+  }
+});
 
 app.use(express.json());
 app.use(cookieParser());
@@ -247,6 +361,66 @@ app.get('/api/auth/me', (req, res) => {
   const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
   if (!user || !store) return res.json({ signedIn: false });
   res.json({ signedIn: true, role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address } });
+});
+
+// =====================================================================
+// BILLING
+// =====================================================================
+
+app.get('/api/billing/status', requireAuth, (req, res) => {
+  const store = db.prepare(`
+    SELECT subscription_status, stripe_customer_id, stripe_subscription_id
+    FROM stores
+    WHERE id = ?
+  `).get(req.auth.storeId);
+
+  if (!store) return res.status(404).json({ error: 'Store not found.' });
+
+  res.json({
+    status: store.subscription_status || 'inactive',
+    active: ['active', 'trialing'].includes(store.subscription_status),
+    hasCustomer: Boolean(store.stripe_customer_id),
+    hasSubscription: Boolean(store.stripe_subscription_id),
+  });
+});
+
+app.post('/api/billing/create-checkout-session', requireManager, async (req, res) => {
+  if (!stripe || !STRIPE_PRICE_ID) {
+    return res.status(500).json({ error: 'Stripe billing is not configured.' });
+  }
+
+  try {
+    const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
+    const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.auth.userId);
+
+    if (!store || !user) return res.status(404).json({ error: 'Store account not found.' });
+
+    if (['active', 'trialing'].includes(store.subscription_status)) {
+      return res.status(409).json({ error: 'This store already has an active subscription.' });
+    }
+
+    const sessionOptions = {
+      mode: 'subscription',
+      line_items: [{ price: STRIPE_PRICE_ID, quantity: 1 }],
+      success_url: `${req.protocol}://${req.get('host')}/?checkout=success`,
+      cancel_url: `${req.protocol}://${req.get('host')}/?checkout=cancelled`,
+      client_reference_id: store.id,
+      metadata: { storeId: store.id },
+      subscription_data: { metadata: { storeId: store.id } },
+    };
+
+    if (store.stripe_customer_id) {
+      sessionOptions.customer = store.stripe_customer_id;
+    } else if (user.email) {
+      sessionOptions.customer_email = user.email;
+    }
+
+    const session = await stripe.checkout.sessions.create(sessionOptions);
+    return res.json({ url: session.url });
+  } catch (err) {
+    console.error('Checkout creation failed:', err);
+    return res.status(500).json({ error: 'Could not start checkout.' });
+  }
 });
 
 // =====================================================================
@@ -613,4 +787,5 @@ app.listen(PORT, () => {
   console.log(`FloorStock server running at http://localhost:${PORT}`);
   console.log(`Database file: ${DB_PATH}`);
   console.log(RESEND_API_KEY ? `Digest email enabled (daily at ${DIGEST_HOUR_UTC}:00 UTC)` : 'Digest email disabled (no RESEND_API_KEY set)');
+  console.log(stripe && STRIPE_PRICE_ID ? 'Stripe billing enabled' : 'Stripe billing disabled (missing STRIPE_SECRET_KEY or STRIPE_PRICE_ID)');
 });
