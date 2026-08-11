@@ -399,6 +399,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
           Import
         </button>
+        <button class="btn-ghost" id="invoiceImportBtn" style="display:none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/></svg>
+          Invoice
+        </button>
         <button class="btn-ghost" id="exportBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Export
@@ -814,6 +818,33 @@
   </div>
 
   <!-- bulk CSV import modal -->
+  <!-- invoice import modal -->
+  <div class="modal-overlay" id="invoiceImportOverlay">
+    <div class="modal" style="max-width:440px;">
+      <div class="modal-header">
+        <div class="modal-title">IMPORT FROM INVOICE</div>
+        <button class="modal-close" id="invoiceImportCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <p style="font-size:13px; color:var(--muted-2); line-height:1.6; margin-top:0;">
+          Upload a photo or PDF of a vendor invoice. Each line item gets queued as a
+          pending scan for you to review &mdash; nothing is added to your floor stock
+          automatically. Expiration dates aren't printed on invoices, so you'll fill
+          those in yourself for each item, same as completing a bulk scan.
+        </p>
+        <div class="auth-field">
+          <label>Invoice photo or PDF</label>
+          <input type="file" id="invoiceFileInput" accept="image/jpeg,image/png,image/webp,application/pdf" class="field-input" style="padding:8px;">
+        </div>
+        <div class="auth-error" id="invoiceImportError" style="display:none;"></div>
+        <div id="invoiceImportResult" style="display:none; background:var(--ok-tint); color:var(--ok-text); border-radius:8px; padding:12px 14px; font-size:13px; margin-bottom:14px; line-height:1.5;"></div>
+        <button type="button" class="submit-btn" id="invoiceImportSubmitBtn" disabled>Choose a file first</button>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="importOverlay">
     <div class="modal" style="max-width:440px;">
       <div class="modal-header">
@@ -1310,6 +1341,7 @@
     handleCheckoutRedirect();
     checkAdminAccess();
     checkOrgDashboardVisibility();
+    checkInvoiceImportAvailability();
     loadOnboardingState();
     loadUrgencyThresholds();
     loadPendingItems();
@@ -1631,6 +1663,9 @@
       items.push({ id: 'pendingItemsBtn', label: 'Pending scans', icon: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>', badge: pendingItems.length });
     }
     items.push({ id: 'importBtn', label: 'Import inventory', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>' });
+    if (document.getElementById('invoiceImportBtn').style.display === 'flex') {
+      items.push({ id: 'invoiceImportBtn', label: 'Import invoice', icon: '<path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/><path d="M16 13H8"/><path d="M16 17H8"/><path d="M10 9H8"/>' });
+    }
     items.push({ id: 'exportBtn', label: 'Export inventory', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>' });
     items.push({ id: 'printLabelsBtn', label: 'Print labels', icon: '<path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>' });
     if (document.getElementById('workersBtn').style.display === 'flex') {
@@ -2477,6 +2512,89 @@
   });
 
   // =====================================================================
+  // INVOICE IMPORT
+  // =====================================================================
+
+  async function checkInvoiceImportAvailability() {
+    if (currentUser.role !== 'manager') return;
+    try {
+      const status = await apiRequest('/api/invoices/status');
+      if (status.enabled) document.getElementById('invoiceImportBtn').style.display = 'flex';
+    } catch (e) {
+      // leave hidden if this fails
+    }
+  }
+
+  document.getElementById('invoiceImportBtn').addEventListener('click', () => {
+    document.getElementById('invoiceFileInput').value = '';
+    document.getElementById('invoiceImportError').style.display = 'none';
+    document.getElementById('invoiceImportResult').style.display = 'none';
+    document.getElementById('invoiceImportSubmitBtn').disabled = true;
+    document.getElementById('invoiceImportSubmitBtn').textContent = 'Choose a file first';
+    document.getElementById('invoiceImportOverlay').classList.add('open');
+  });
+  document.getElementById('invoiceImportCloseBtn').addEventListener('click', () => {
+    document.getElementById('invoiceImportOverlay').classList.remove('open');
+  });
+  document.getElementById('invoiceImportOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'invoiceImportOverlay') document.getElementById('invoiceImportOverlay').classList.remove('open');
+  });
+
+  document.getElementById('invoiceFileInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    const btn = document.getElementById('invoiceImportSubmitBtn');
+    if (file) {
+      btn.disabled = false;
+      btn.textContent = `Read ${file.name}`;
+    } else {
+      btn.disabled = true;
+      btn.textContent = 'Choose a file first';
+    }
+  });
+
+  document.getElementById('invoiceImportSubmitBtn').addEventListener('click', () => {
+    const file = document.getElementById('invoiceFileInput').files[0];
+    const errEl = document.getElementById('invoiceImportError');
+    const resultEl = document.getElementById('invoiceImportResult');
+    errEl.style.display = 'none';
+    resultEl.style.display = 'none';
+    if (!file) return;
+
+    const btn = document.getElementById('invoiceImportSubmitBtn');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Reading invoice\u2026 this can take a few seconds';
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const base64 = reader.result.split(',')[1]; // strip the "data:image/jpeg;base64," prefix
+        const result = await apiRequest('/api/invoices/import', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ image: base64, mediaType: file.type }),
+        });
+        resultEl.textContent = `Found ${result.imported} item${result.imported !== 1 ? 's' : ''}${result.vendor ? ` from ${result.vendor}` : ''}. Review them in Pending scans to add expiration dates and locations.`;
+        resultEl.style.display = 'block';
+        showToast(`Extracted ${result.imported} item${result.imported !== 1 ? 's' : ''}`);
+        await loadPendingItems();
+      } catch (err) {
+        errEl.textContent = err.message || 'Couldn\u2019t read that invoice.';
+        errEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    };
+    reader.onerror = () => {
+      errEl.textContent = 'Couldn\u2019t read that file.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = originalText;
+    };
+    reader.readAsDataURL(file);
+  });
+
+  // =====================================================================
   // BULK CSV IMPORT
   // =====================================================================
 
@@ -2701,6 +2819,47 @@
   function getVendors() {
     return Array.from(new Set(items.map(i => i.vendor).filter(Boolean))).sort();
   }
+
+  // Expands a scanned 6/7/8-digit UPC-E (compressed barcode, common on gum
+  // and small packaging) to its full 12-digit UPC-A form, per GS1's
+  // zero-suppression rules. Mirrors the same algorithm used server-side.
+  function expandUpcE(raw) {
+    const s = String(raw).replace(/\D/g, '');
+    let nsc, body;
+    if (s.length === 8) { nsc = s[0]; body = s.slice(1, 7); }
+    else if (s.length === 7) { nsc = s[0]; body = s.slice(1, 7); }
+    else if (s.length === 6) { nsc = '0'; body = s; }
+    else return null;
+    if (nsc !== '0' && nsc !== '1') return null;
+
+    const digits6 = body.split('').map(Number);
+    const [d1, d2, d3, d4, d5, d6] = digits6;
+    let eleven;
+    if (d6 <= 2) eleven = `${nsc}${d1}${d2}${d6}0000${d3}${d4}${d5}`;
+    else if (d6 === 3) eleven = `${nsc}${d1}${d2}${d3}00000${d4}${d5}`;
+    else if (d6 === 4) eleven = `${nsc}${d1}${d2}${d3}${d4}00000${d5}`;
+    else eleven = `${nsc}${d1}${d2}${d3}${d4}${d5}0000${d6}`;
+    if (eleven.length !== 11 || /\D/.test(eleven)) return null;
+
+    const digits = eleven.split('').map(Number);
+    let sum = 0;
+    for (let i = 0; i < 11; i++) sum += digits[i] * ((i + 1) % 2 === 1 ? 3 : 1);
+    const check = (10 - (sum % 10)) % 10;
+    return eleven + check;
+  }
+
+  // A scanned code that's 6-8 digits is almost certainly compressed UPC-E —
+  // expand it to standard UPC-A right at capture, so what actually gets
+  // stored and printed later is always the full, unambiguous barcode.
+  function normalizeScannedUpc(raw) {
+    const s = String(raw).replace(/\D/g, '');
+    if (s.length === 6 || s.length === 7 || s.length === 8) {
+      const expanded = expandUpcE(s);
+      if (expanded) return expanded;
+    }
+    return raw;
+  }
+
   function todayDateStr() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -3218,32 +3377,34 @@
     if (!pending) { showToast('That pending scan is gone'); return; }
     editingId = null;
     completingPendingId = pendingId;
+    const isNoUpc = pending.upc && pending.upc.startsWith('NOUPC-');
 
     document.getElementById('modalTitle').textContent = 'COMPLETE SCAN';
     document.getElementById('submitBtn').textContent = 'Add to floor';
     document.getElementById('editId').value = '';
-    document.getElementById('upcInput').value = pending.upc;
+    document.getElementById('upcInput').value = isNoUpc ? 'No barcode' : pending.upc;
     document.getElementById('upcInput').disabled = true;
     document.getElementById('scanBtn').style.display = 'none';
     document.getElementById('noUpcCheckbox').checked = false;
     document.getElementById('noUpcCheckbox').closest('label').style.display = 'none';
     document.getElementById('nameInput').value = pending.name || '';
-    resetBatchRows('', '', true);
+    resetBatchRows('', pending.defaultQuantity !== null && pending.defaultQuantity !== undefined ? pending.defaultQuantity : '', true);
     document.getElementById('unitInput').value = 'each';
     document.getElementById('locInput').value = '';
     populateLocationDatalist();
     document.getElementById('datePurchasedInput').value = todayDateStr();
-    document.getElementById('vendorInput').value = '';
+    document.getElementById('vendorInput').value = pending.vendor || '';
     populateVendorDatalist();
     populateCategorySelect();
     document.getElementById('categoryInput').value = '';
     document.getElementById('sizeValueInput').value = pending.sizeValue !== null && pending.sizeValue !== undefined ? pending.sizeValue : '';
     document.getElementById('sizeUnitInput').value = pending.sizeUnit || '';
-    document.getElementById('costPriceInput').value = '';
+    document.getElementById('costPriceInput').value = pending.costPrice !== null && pending.costPrice !== undefined ? pending.costPrice : '';
     document.getElementById('sellingPriceInput').value = '';
     sellingPriceManuallyEdited = false;
     document.getElementById('targetMarginInput').value = 50;
-    document.getElementById('priceSuggestNote').style.display = 'none';
+    if (pending.costPrice) applyPriceSuggestion();
+    else document.getElementById('priceSuggestNote').style.display = 'none';
     document.getElementById('marketPriceNote').style.display = 'none';
     document.getElementById('sizeAutoNote').style.display = 'none';
     document.getElementById('inlineCategoryForm').style.display = 'none';
@@ -3578,9 +3739,10 @@
 
     zxingReader.decodeFromConstraints(constraints, video, (result, err) => {
       if (result && scanning) {
-        document.getElementById('upcInput').value = result.getText();
-        lookupUpc(result.getText());
-        checkExistingBatches(result.getText());
+        const upc = normalizeScannedUpc(result.getText());
+        document.getElementById('upcInput').value = upc;
+        lookupUpc(upc);
+        checkExistingBatches(upc);
         stopScan();
       }
     }).catch((e) => {
@@ -3640,11 +3802,18 @@
       return;
     }
     emptyEl.style.display = 'none';
-    listEl.innerHTML = pendingItems.map(p => `
+    listEl.innerHTML = pendingItems.map(p => {
+      const upcLabel = p.upc && p.upc.startsWith('NOUPC-') ? 'No barcode' : p.upc;
+      const extras = [
+        p.sizeValue ? `${esc(p.sizeValue)} ${esc(p.sizeUnit || '')}` : '',
+        p.vendor ? esc(p.vendor) : '',
+        p.costPrice !== null && p.costPrice !== undefined ? `cost $${Number(p.costPrice).toFixed(2)}` : '',
+      ].filter(Boolean).join(' \u00b7 ');
+      return `
       <div style="display:flex; align-items:center; justify-content:space-between; background:var(--surface); border-radius:8px; padding:10px 12px; gap:10px;">
         <div style="min-width:0;">
           <div style="font-weight:600; font-size:13.5px;">${esc(p.name || 'Unrecognized product')}</div>
-          <div class="mono" style="color:var(--muted); font-size:11.5px; margin-top:2px;">${esc(p.upc)}${p.sizeValue ? ` \u00b7 ${esc(p.sizeValue)} ${esc(p.sizeUnit || '')}` : ''}</div>
+          <div class="mono" style="color:var(--muted); font-size:11.5px; margin-top:2px;">${esc(upcLabel)}${extras ? ` \u00b7 ${extras}` : ''}</div>
         </div>
         <div class="tag-actions" style="margin-top:0; border-top:none; padding-top:0; flex-shrink:0;">
           <button type="button" class="edit-btn" data-complete-id="${p.id}">Complete</button>
@@ -3653,7 +3822,8 @@
           </button>
         </div>
       </div>
-    `).join('');
+    `;
+    }).join('');
     listEl.querySelectorAll('[data-complete-id]').forEach(btn => {
       btn.addEventListener('click', () => {
         document.getElementById('pendingItemsOverlay').classList.remove('open');
@@ -3752,7 +3922,7 @@
 
     bulkZxingReader.decodeFromConstraints(constraints, video, (result, err) => {
       if (result && bulkScanning) {
-        const upc = result.getText();
+        const upc = normalizeScannedUpc(result.getText());
         const now = Date.now();
         // Debounce: ignore the same barcode if it's still in frame from the last scan
         if (upc === bulkLastScanUpc && (now - bulkLastScanTime) < 2500) return;

@@ -33,6 +33,10 @@ const USDA_FDC_API_KEY = process.env.USDA_FDC_API_KEY || '';
 // anyone if this isn't set). Set this to your own manager account's email.
 const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 
+// Invoice import (optional — feature is simply unavailable without this).
+// Costs a small amount per invoice processed; see README for an estimate.
+const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
+
 // Make sure the database's directory exists (e.g. a Render disk mount path
 // like /data) before trying to open it — otherwise better-sqlite3 throws and
 // the whole server crashes on boot instead of starting.
@@ -227,7 +231,10 @@ db.exec(`
     size_value REAL,
     size_unit TEXT,
     scanned_by TEXT,
-    scanned_at TEXT NOT NULL
+    scanned_at TEXT NOT NULL,
+    cost_price REAL,
+    vendor TEXT,
+    default_quantity REAL
   );
 
   CREATE TABLE IF NOT EXISTS tasks (
@@ -314,6 +321,11 @@ if (!sessionCols.includes('organization_id')) db.exec("ALTER TABLE sessions ADD 
 const orgCols = db.prepare("PRAGMA table_info(organizations)").all().map(c => c.name);
 if (!orgCols.includes('critical_days')) db.exec("ALTER TABLE organizations ADD COLUMN critical_days INTEGER NOT NULL DEFAULT 3");
 if (!orgCols.includes('soon_days')) db.exec("ALTER TABLE organizations ADD COLUMN soon_days INTEGER NOT NULL DEFAULT 60");
+
+const pendingItemCols = db.prepare("PRAGMA table_info(pending_items)").all().map(c => c.name);
+if (!pendingItemCols.includes('cost_price')) db.exec("ALTER TABLE pending_items ADD COLUMN cost_price REAL");
+if (!pendingItemCols.includes('vendor')) db.exec("ALTER TABLE pending_items ADD COLUMN vendor TEXT");
+if (!pendingItemCols.includes('default_quantity')) db.exec("ALTER TABLE pending_items ADD COLUMN default_quantity REAL");
 
 // ---------- Stripe webhook (needs the RAW body for signature verification,
 // so this is registered before express.json() touches the request) ----------
@@ -1058,13 +1070,47 @@ function parseSizeFromText(text) {
   return { value, unit };
 }
 
+// Expands a 6, 7, or 8-digit UPC-E (the compressed barcode format common on
+// gum, candy, and other small packaging) to its full 12-digit UPC-A form,
+// per the GS1 General Specifications zero-suppression rules. Returns null
+// if the input isn't a plausible UPC-E code.
+function expandUpcE(raw) {
+  const s = String(raw).replace(/\D/g, '');
+  let nsc, body;
+  if (s.length === 8) { nsc = s[0]; body = s.slice(1, 7); }
+  else if (s.length === 7) { nsc = s[0]; body = s.slice(1, 7); }
+  else if (s.length === 6) { nsc = '0'; body = s; }
+  else return null;
+  if (nsc !== '0' && nsc !== '1') return null;
+
+  const [d1, d2, d3, d4, d5, d6] = body.split('').map(Number);
+  let eleven;
+  if (d6 <= 2) eleven = `${nsc}${d1}${d2}${d6}0000${d3}${d4}${d5}`;
+  else if (d6 === 3) eleven = `${nsc}${d1}${d2}${d3}00000${d4}${d5}`;
+  else if (d6 === 4) eleven = `${nsc}${d1}${d2}${d3}${d4}00000${d5}`;
+  else eleven = `${nsc}${d1}${d2}${d3}${d4}${d5}0000${d6}`;
+  if (eleven.length !== 11 || /[^0-9]/.test(eleven)) return null;
+
+  const digits = eleven.split('').map(Number);
+  let sum = 0;
+  for (let i = 0; i < 11; i++) sum += digits[i] * ((i + 1) % 2 === 1 ? 3 : 1);
+  const check = (10 - (sum % 10)) % 10;
+  return eleven + check;
+}
+
 // A 12-digit UPC-A and its 13-digit EAN-13 form (leading zero) are the same
 // product but different strings — try both so a format mismatch alone
-// doesn't cause a false "not found."
+// doesn't cause a false "not found." A 6/7/8-digit code gets expanded from
+// UPC-E to full UPC-A too, since compressed barcodes won't match a database
+// that only stores the full form.
 function upcVariants(upc) {
   const variants = [upc];
   if (upc.length === 12) variants.push('0' + upc);
   if (upc.length === 13 && upc.startsWith('0')) variants.push(upc.slice(1));
+  if (upc.length === 6 || upc.length === 7 || upc.length === 8) {
+    const expanded = expandUpcE(upc);
+    if (expanded) { variants.push(expanded); variants.push('0' + expanded); }
+  }
   return variants;
 }
 
@@ -1588,6 +1634,9 @@ function rowToPendingItem(row) {
     sizeUnit: row.size_unit || null,
     scannedBy: row.scanned_by || null,
     scannedAt: row.scanned_at,
+    costPrice: row.cost_price === null || row.cost_price === undefined ? null : row.cost_price,
+    vendor: row.vendor || null,
+    defaultQuantity: row.default_quantity === null || row.default_quantity === undefined ? null : row.default_quantity,
   };
 }
 
@@ -1651,6 +1700,109 @@ app.post('/api/pending-items/:id/complete', requireAuth, requireActiveSubscripti
 
   const row = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
   res.status(201).json(rowToItem(row));
+});
+
+// =====================================================================
+// INVOICE / RECEIPT IMPORT (optional — needs ANTHROPIC_API_KEY)
+// Reads a photographed or scanned vendor invoice, extracts line items, and
+// queues each as a pending item for manual review — same as bulk scan.
+// Never creates real inventory directly from AI-extracted data.
+// =====================================================================
+
+async function extractInvoiceLineItems(base64Data, mediaType) {
+  const isPdf = mediaType === 'application/pdf';
+  const contentBlock = isPdf
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64Data } }
+    : { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64Data } };
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': ANTHROPIC_API_KEY, 'anthropic-version': '2023-06-01', 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 3000,
+      messages: [{
+        role: 'user',
+        content: [
+          contentBlock,
+          {
+            type: 'text',
+            text: 'This is a vendor invoice or receipt for a convenience store. Extract every product line item. ' +
+              'Respond with ONLY a JSON object, no other text, no markdown fences, in exactly this shape: ' +
+              '{"vendor": "string or null", "lineItems": [{"name": "string", "quantity": number or null, "unitCost": number or null}]}. ' +
+              'Do not include tax, subtotal, total, discount, or shipping lines as line items. ' +
+              'If the vendor name isn\u2019t clearly printed, use null rather than guessing.',
+          },
+        ],
+      }],
+    }),
+  });
+  if (!response.ok) {
+    const body = await response.text().catch(() => '');
+    throw new Error(`Claude API error (${response.status}): ${body.slice(0, 200)}`);
+  }
+  const data = await response.json();
+  const textBlock = (data.content || []).find(b => b.type === 'text');
+  if (!textBlock) throw new Error('No response from Claude.');
+  const cleaned = textBlock.text.replace(/```json|```/g, '').trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(cleaned);
+  } catch (e) {
+    throw new Error('Couldn\u2019t parse a response from Claude \u2014 try a clearer photo.');
+  }
+  return parsed;
+}
+
+app.get('/api/invoices/status', requireAuth, (req, res) => {
+  res.json({ enabled: !!ANTHROPIC_API_KEY });
+});
+
+app.post('/api/invoices/import', requireManager, async (req, res) => {
+  if (!ANTHROPIC_API_KEY) return res.status(400).json({ error: 'Invoice import isn\u2019t configured on the server yet (missing ANTHROPIC_API_KEY).' });
+  const { image, mediaType } = req.body || {};
+  if (!image || !mediaType) return res.status(400).json({ error: 'No file received.' });
+  if (!/^image\/(jpeg|png|webp|gif)$|^application\/pdf$/.test(mediaType)) {
+    return res.status(400).json({ error: 'Upload a JPEG, PNG, WEBP, or PDF file.' });
+  }
+
+  let extracted;
+  try {
+    extracted = await extractInvoiceLineItems(image, mediaType);
+  } catch (e) {
+    return res.status(502).json({ error: `Couldn\u2019t read that invoice: ${e.message}` });
+  }
+
+  const lineItems = Array.isArray(extracted.lineItems) ? extracted.lineItems : [];
+  if (lineItems.length === 0) return res.status(400).json({ error: 'No line items were found on that invoice \u2014 try a clearer photo or a different file.' });
+  if (lineItems.length > 200) return res.status(400).json({ error: 'That\u2019s a lot of line items to extract at once \u2014 try splitting the invoice into smaller uploads.' });
+
+  const vendor = extracted.vendor ? String(extracted.vendor).trim().slice(0, 200) : null;
+  const insertPending = db.prepare(`
+    INSERT INTO pending_items (id, store_id, upc, name, size_value, size_unit, scanned_by, scanned_at, cost_price, vendor, default_quantity)
+    VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
+  `);
+
+  const created = [];
+  for (const li of lineItems) {
+    const name = li && li.name ? String(li.name).trim().slice(0, 300) : null;
+    if (!name) continue;
+    const quantity = Number(li.quantity);
+    const unitCost = Number(li.unitCost);
+    const id = newId();
+    const placeholderUpc = `NOUPC-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    insertPending.run(
+      id, req.auth.storeId, placeholderUpc, name,
+      currentUsername(req), nowIso(),
+      Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : null,
+      vendor,
+      Number.isFinite(quantity) && quantity >= 0 ? quantity : null
+    );
+    created.push(rowToPendingItem(db.prepare('SELECT * FROM pending_items WHERE id = ?').get(id)));
+  }
+
+  logAudit(req.auth.storeId, currentUsername(req), 'invoice_imported', `Imported ${created.length} line item${created.length !== 1 ? 's' : ''} from an invoice${vendor ? ` (${vendor})` : ''} \u2014 pending review`);
+  res.json({ imported: created.length, vendor, items: created });
 });
 
 // =====================================================================
@@ -2047,4 +2199,5 @@ app.listen(PORT, () => {
   console.log(RESEND_API_KEY ? 'Weekly per-store backup email enabled' : 'Weekly per-store backup email disabled (no RESEND_API_KEY set)');
   console.log(USDA_FDC_API_KEY ? 'USDA FoodData Central UPC source enabled' : 'USDA FoodData Central UPC source disabled (no USDA_FDC_API_KEY set)');
   console.log(ADMIN_EMAIL ? `Founder dashboard enabled for ${ADMIN_EMAIL}` : 'Founder dashboard disabled (no ADMIN_EMAIL set)');
+  console.log(ANTHROPIC_API_KEY ? 'Invoice import enabled' : 'Invoice import disabled (no ANTHROPIC_API_KEY set)');
 });

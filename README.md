@@ -138,6 +138,28 @@ database, and a browser frontend.
   is a responsive layout change to the existing web app, not a separate native app —
   see the note below on why that's the more practical choice for now.
 
+- **Compressed barcode support (UPC-E)** — small-package barcodes (gum, candy) that
+  are 6-8 digits instead of the usual 12 are now correctly expanded to standard UPC-A
+  before lookup or storage, using the verified GS1 zero-suppression algorithm. Applies
+  to both camera scanning and manual UPC lookups.
+- **Invoice import** — upload a photo or PDF of a vendor invoice (Manage → Invoice, or
+  the "Invoice" header button) and Claude reads it directly, extracting every line item
+  (product name, quantity, cost) with no separate OCR step needed. Each line becomes a
+  *pending item* — same queue as bulk scan — so nothing is added to your floor stock
+  automatically; you review and complete each one with an expiration date and location
+  yourself. Optional, and costs a small amount per invoice processed (see setup below).
+
+### Setting up invoice import (optional, small ongoing cost)
+
+1. Get an API key at [console.anthropic.com](https://console.anthropic.com) — this is
+   billed usage, not free, though the actual cost per invoice is small (roughly a
+   fraction of a cent to a couple of cents each, depending on invoice length).
+   Consider setting a spending limit on the key as a safety net.
+2. In Render, add environment variable **Key** `ANTHROPIC_API_KEY`, **Value** the key
+   you got.
+3. Redeploy. The startup logs will confirm whether it picked up the key. The "Invoice"
+   button only appears for managers once this is configured.
+
 ### On going further: a real native app
 
 What's built above already gives a genuinely app-like mobile experience — "Add to Home
@@ -410,6 +432,8 @@ on login/registration and required on the routes marked "auth".
 | POST   | `/api/pending-items`          | any      | Queue a scanned UPC; body `{ upc }`        |
 | DELETE | `/api/pending-items/:id`      | any      | Discard a pending scan                     |
 | POST   | `/api/pending-items/:id/complete` | any  | Turn a pending scan into a real item; same body shape as `POST /api/items` |
+| GET    | `/api/invoices/status`        | any      | Whether invoice import is configured (`ANTHROPIC_API_KEY` set) |
+| POST   | `/api/invoices/import`        | manager  | Extract line items from an invoice; body `{ image: base64, mediaType }` |
 | GET    | `/api/org/dashboard`          | manager  | Combined totals + per-location breakdown across the organization |
 | PUT    | `/api/items/:id`              | any      | Update an item                             |
 | DELETE | `/api/items/:id`              | any      | Delete an item; body `{ reason }` (sold/expired/other) |
