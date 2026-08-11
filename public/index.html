@@ -2414,7 +2414,6 @@
 <html>
 <head>
 <title>FloorStock Labels</title>
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
 <style>
   body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
   .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -2431,14 +2430,18 @@
 </html>`);
     win.document.close();
 
+    // Draw using the already-loaded JsBarcode from *this* window, targeting
+    // elements in the popup's DOM — avoids relying on a script tag loading
+    // inside the popup, which Chrome can silently block or delay (the
+    // "document.write" intervention) for cross-origin scripts.
     win.onload = () => {
       itemsToLabel.forEach((it, i) => {
         const el = win.document.getElementById('barcode-' + i);
         try {
-          win.JsBarcode(el, it.upc, { format: barcodeFormatFor(it.upc), displayValue: true, fontSize: 12, height: 40, margin: 4 });
+          JsBarcode(el, it.upc, { format: barcodeFormatFor(it.upc), displayValue: true, fontSize: 12, height: 40, margin: 4 });
         } catch (e) {
           try {
-            win.JsBarcode(el, it.upc, { format: 'CODE128', displayValue: true, fontSize: 12, height: 40, margin: 4 });
+            JsBarcode(el, it.upc, { format: 'CODE128', displayValue: true, fontSize: 12, height: 40, margin: 4 });
           } catch (e2) { /* if even CODE128 fails on this value, leave the label without a barcode graphic */ }
         }
       });
@@ -2516,7 +2519,6 @@
 <html>
 <head>
 <title>FloorStock Shelf QR Labels</title>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\/script>
 <style>
   body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
   .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
@@ -2533,6 +2535,10 @@
 </html>`);
     win.document.close();
 
+    // Draw using the already-loaded QRCode from *this* window, targeting
+    // canvases in the popup's DOM — avoids relying on a script tag loading
+    // inside the popup, which Chrome can silently block or delay (the
+    // "document.write" intervention) for cross-origin scripts.
     win.onload = () => {
       let remaining = locations.length;
       const triggerPrintWhenDone = () => {
@@ -2544,7 +2550,7 @@
         try {
           // toCanvas is asynchronous — printing before it resolves would
           // capture a blank canvas, so wait for its callback before printing.
-          win.QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, () => {
+          QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, () => {
             triggerPrintWhenDone();
           });
         } catch (e) {
