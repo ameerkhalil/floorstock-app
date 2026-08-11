@@ -131,6 +131,25 @@ database, and a browser frontend.
   and a recheck reminder. Suggestions never go below cost price. Deliberately doesn't
   suggest a physical relocation ("move to front cooler") since the app has no real data
   about your store's layout to base that on.
+- **Simplified mobile navigation** — on phone-sized screens (760px and under), the
+  cluttered desktop header collapses into a standard bottom nav bar: Home, Scan, Tasks,
+  and More. Everything else (import/export, print labels, Manage, All locations,
+  founder dashboard, sign out) lives behind "More" instead of crowding the header. This
+  is a responsive layout change to the existing web app, not a separate native app —
+  see the note below on why that's the more practical choice for now.
+
+### On going further: a real native app
+
+What's built above already gives a genuinely app-like mobile experience — "Add to Home
+Screen" plus the simplified bottom nav — at no extra cost. If you eventually want actual
+App Store / Google Play listings, know going in that the two platforms differ a lot:
+Google Play accepts a wrapped web app (via Trusted Web Activity) fairly easily and
+cheaply ($25 one-time). **Apple explicitly rejects apps that are just a website in a
+wrapper** (App Store Guideline 4.2, "Minimum Functionality") — getting past that requires
+real native features layered on top (push notifications, native camera integration,
+offline handling), typically via a tool like Capacitor, plus the $99/year Apple Developer
+Program fee. Worth revisiting once you know app-store discoverability specifically
+matters to your growth, rather than building it speculatively now.
 
 ### Important: existing data isn't tied to a store
 
