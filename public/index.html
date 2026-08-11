@@ -14,6 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <style>
   :root {
     --bg: #EDEFF1;
@@ -120,6 +121,8 @@
   .tag-size { color: var(--muted-2); font-weight: 600; }
   .tag-price { font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; color: var(--ok-text); margin-top: 8px; }
   .tag-price-cost { font-family: 'Inter', sans-serif; font-weight: 500; color: var(--muted); font-size: 11.5px; }
+  .tag-markdown { font-size: 12px; font-weight: 700; color: var(--critical-text); background: var(--critical-tint); border-radius: 6px; padding: 5px 9px; margin-top: 6px; }
+  .tag-markdown-pct { font-weight: 500; }
   .tag-loc { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 13px; color: var(--muted-2); }
   .tag-bottom { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px; }
   .tag-date { font-size: 12px; color: var(--muted); }
@@ -131,6 +134,7 @@
   .tag-actions .del-btn { flex: 0 0 auto; padding: 7px 10px; color: var(--expired-band); }
   .tag-actions .del-btn.confirm { background: var(--expired-band); color: #fff; }
   .tag-actions .sell-btn { background: var(--ok-tint); color: var(--ok-text); }
+  .tag-actions .label-btn { flex: 0 0 auto; padding: 7px 10px; color: var(--muted-2); }
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(28,37,48,0.55); display: none; align-items: center; justify-content: center; z-index: 250; padding: 16px; }
   .modal-overlay.open { display: flex; }
@@ -363,9 +367,17 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Export
         </button>
+        <button class="btn-ghost" id="printLabelsBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+          Print labels
+        </button>
         <button class="btn-ghost" id="workersBtn" style="display:none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           Manage
+        </button>
+        <button class="btn-ghost" id="orgDashboardBtn" style="display:none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9"/><rect x="14" y="3" width="7" height="5"/><rect x="14" y="12" width="7" height="9"/><rect x="3" y="16" width="7" height="5"/></svg>
+          All locations
         </button>
         <button class="btn-ghost" id="logoutBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
@@ -539,9 +551,16 @@
             <datalist id="knownLocationsList"></datalist>
           </div>
         </div>
-        <div>
-          <label class="field-label">Date purchased <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
-          <input class="field-input" type="date" id="datePurchasedInput">
+        <div class="row-2">
+          <div>
+            <label class="field-label">Date purchased <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+            <input class="field-input" type="date" id="datePurchasedInput">
+          </div>
+          <div>
+            <label class="field-label">Vendor <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+            <input class="field-input" id="vendorInput" placeholder="e.g. Sysco" list="knownVendorsList" autocomplete="off">
+            <datalist id="knownVendorsList"></datalist>
+          </div>
         </div>
         <div class="row-2">
           <div>
@@ -639,6 +658,27 @@
         </p>
         <div id="pendingItemsList" style="display:flex; flex-direction:column; gap:8px;"></div>
         <div id="pendingItemsEmpty" style="font-size:13px; color:var(--muted); display:none;">Nothing pending right now.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- cross-location dashboard modal -->
+  <div class="modal-overlay" id="orgDashboardOverlay">
+    <div class="modal" style="max-width:640px;">
+      <div class="modal-header">
+        <div class="modal-title">ALL LOCATIONS</div>
+        <button class="modal-close" id="orgDashboardCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px; max-height: 75vh; overflow-y: auto;">
+        <div id="orgDashboardStats" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:20px;"></div>
+
+        <div class="section-label" style="margin-top:0;">Last 30 days, combined</div>
+        <div id="orgDashboardShrink" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:20px;"></div>
+
+        <div class="section-label">By location</div>
+        <div id="orgDashboardLocations" style="display:flex; flex-direction:column; gap:8px;"></div>
       </div>
     </div>
   </div>
@@ -1139,6 +1179,7 @@
     applyPaywallState();
     handleCheckoutRedirect();
     checkAdminAccess();
+    checkOrgDashboardVisibility();
     loadOnboardingState();
     loadUrgencyThresholds();
     loadPendingItems();
@@ -1174,6 +1215,16 @@
       document.getElementById('adminDashboardBtn').style.display = 'flex';
     } catch (e) {
       // not the founder account — silently keep the button hidden, no error shown
+    }
+  }
+
+  async function checkOrgDashboardVisibility() {
+    if (currentUser.role !== 'manager') return;
+    try {
+      const stores = await apiRequest('/api/stores');
+      if (stores.length > 1) document.getElementById('orgDashboardBtn').style.display = 'flex';
+    } catch (e) {
+      // leave hidden if this fails
     }
   }
 
@@ -1225,6 +1276,71 @@
           <span style="color:var(--muted); float:right;">${esc(s.status)} \u00b7 ${new Date(s.createdAt).toLocaleDateString()}</span>
         </div>
       `).join('');
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t load the dashboard');
+    }
+  }
+
+  document.getElementById('orgDashboardBtn').addEventListener('click', openOrgDashboard);
+  document.getElementById('orgDashboardCloseBtn').addEventListener('click', () => {
+    document.getElementById('orgDashboardOverlay').classList.remove('open');
+  });
+  document.getElementById('orgDashboardOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'orgDashboardOverlay') document.getElementById('orgDashboardOverlay').classList.remove('open');
+  });
+
+  async function openOrgDashboard() {
+    document.getElementById('orgDashboardOverlay').classList.add('open');
+    try {
+      const d = await apiRequest('/api/org/dashboard');
+      const tiles = [
+        { label: 'Locations', value: d.locationCount, color: 'var(--accent)' },
+        { label: 'Total items', value: d.totalItems, color: 'var(--muted-2)' },
+        { label: 'Inventory value', value: `$${d.totalValue.toFixed(2)}`, color: 'var(--accent)' },
+        { label: 'Expired', value: d.totalExpired, color: 'var(--expired-text)' },
+        { label: 'Critical', value: d.totalCritical, color: 'var(--critical-text)' },
+        { label: 'Soon', value: d.totalSoon, color: 'var(--soon-text)' },
+      ];
+      document.getElementById('orgDashboardStats').innerHTML = tiles.map(t => `
+        <div class="dash-stat">
+          <div class="dash-stat-value" style="font-size:22px; color:${t.color};">${t.value}</div>
+          <div class="dash-stat-label">${esc(t.label)}</div>
+        </div>
+      `).join('');
+
+      const shrinkTiles = [
+        { label: 'Lost to expiration', value: `$${d.shrink30d.lostCost.toFixed(2)}`, color: 'var(--expired-band)' },
+        { label: 'Revenue from sales', value: `$${d.shrink30d.savedRevenue.toFixed(2)}`, color: 'var(--ok-band)' },
+        { label: 'Profit from sales', value: `$${d.shrink30d.savedProfit.toFixed(2)}`, color: 'var(--ok-band)' },
+      ];
+      document.getElementById('orgDashboardShrink').innerHTML = shrinkTiles.map(t => `
+        <div class="dash-stat">
+          <div class="dash-stat-value" style="font-size:19px; color:${t.color};">${t.value}</div>
+          <div class="dash-stat-label">${esc(t.label)}</div>
+        </div>
+      `).join('');
+
+      const locEl = document.getElementById('orgDashboardLocations');
+      locEl.innerHTML = d.locations.map(loc => `
+        <button type="button" class="location-row" data-switch-store-id="${loc.id}" style="flex-direction:column; align-items:stretch; gap:4px;">
+          <div style="display:flex; justify-content:space-between; width:100%;">
+            <span>${esc(loc.name)}</span>
+            <span>$${loc.value.toFixed(2)}</span>
+          </div>
+          <div class="loc-addr" style="display:flex; gap:10px;">
+            <span>${loc.itemCount} items</span>
+            ${loc.expired ? `<span style="color:var(--expired-text);">${loc.expired} expired</span>` : ''}
+            ${loc.critical ? `<span style="color:var(--critical-text);">${loc.critical} critical</span>` : ''}
+            ${loc.soon ? `<span style="color:var(--soon-text);">${loc.soon} soon</span>` : ''}
+          </div>
+        </button>
+      `).join('');
+      locEl.querySelectorAll('[data-switch-store-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          document.getElementById('orgDashboardOverlay').classList.remove('open');
+          await switchLocation(btn.dataset.switchStoreId);
+        });
+      });
     } catch (e) {
       showToast(e.message || 'Couldn\u2019t load the dashboard');
     }
@@ -1801,6 +1917,79 @@
   });
 
   // =====================================================================
+  // PRINTABLE SHELF LABELS
+  // =====================================================================
+
+  function barcodeFormatFor(upc) {
+    if (/^\d{12}$/.test(upc)) return 'UPC';
+    if (/^\d{13}$/.test(upc)) return 'EAN13';
+    if (/^\d{8}$/.test(upc)) return 'EAN8';
+    return 'CODE128'; // handles "No barcode" placeholder codes and anything non-standard
+  }
+
+  function printLabels(itemsToLabel) {
+    if (!itemsToLabel || itemsToLabel.length === 0) {
+      showToast('Nothing to print');
+      return;
+    }
+    const win = window.open('', '_blank');
+    if (!win) {
+      showToast('Pop-up blocked \u2014 allow pop-ups for this site to print labels');
+      return;
+    }
+
+    const labelsHtml = itemsToLabel.map((it, i) => `
+      <div class="label">
+        <div class="label-name">${esc(it.name)}</div>
+        <svg class="label-barcode" id="barcode-${i}"></svg>
+        <div class="label-row">
+          <span>${it.sellingPrice ? '$' + Number(it.sellingPrice).toFixed(2) : ''}</span>
+          <span>Exp: ${esc(formatDate(it.expirationDate))}</span>
+        </div>
+      </div>
+    `).join('');
+
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<title>FloorStock Labels</title>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
+  .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .label { border: 1px dashed #999; border-radius: 6px; padding: 8px; text-align: center; page-break-inside: avoid; }
+  .label-name { font-size: 12px; font-weight: 700; margin-bottom: 4px; height: 30px; overflow: hidden; line-height: 1.25; }
+  .label-barcode { width: 100%; height: auto; }
+  .label-row { display: flex; justify-content: space-between; font-size: 11px; margin-top: 2px; color: #333; }
+  @media print { .label { border: 1px solid #ccc; } }
+</style>
+</head>
+<body>
+  <div class="label-grid">${labelsHtml}</div>
+</body>
+</html>`);
+    win.document.close();
+
+    win.onload = () => {
+      itemsToLabel.forEach((it, i) => {
+        const el = win.document.getElementById('barcode-' + i);
+        try {
+          win.JsBarcode(el, it.upc, { format: barcodeFormatFor(it.upc), displayValue: true, fontSize: 12, height: 40, margin: 4 });
+        } catch (e) {
+          try {
+            win.JsBarcode(el, it.upc, { format: 'CODE128', displayValue: true, fontSize: 12, height: 40, margin: 4 });
+          } catch (e2) { /* if even CODE128 fails on this value, leave the label without a barcode graphic */ }
+        }
+      });
+      setTimeout(() => win.print(), 300);
+    };
+  }
+
+  document.getElementById('printLabelsBtn').addEventListener('click', () => {
+    printLabels(getFiltered());
+  });
+
+  // =====================================================================
   // LOCATIONS (multi-store organizations)
   // =====================================================================
 
@@ -1893,9 +2082,9 @@
   // BULK CSV IMPORT
   // =====================================================================
 
-  const IMPORT_TEMPLATE_CSV = 'Product Name,UPC,Category,Expiration Date,Quantity,Unit,Location,Size,Size Unit,Cost Price,Selling Price,Date Purchased\r\n' +
-    'Organic Whole Milk 1gal,041220576428,Dairy,2026-09-15,12,each,Cooler 2,1,gal,2.50,4.99,2026-08-01\r\n' +
-    'RedBull 12oz,611269003727,Drinks,2026-10-01,24,case,Cooler 5,12,oz,1.25,2.99,2026-08-01\r\n';
+  const IMPORT_TEMPLATE_CSV = 'Product Name,UPC,Category,Expiration Date,Quantity,Unit,Location,Size,Size Unit,Vendor,Cost Price,Selling Price,Date Purchased\r\n' +
+    'Organic Whole Milk 1gal,041220576428,Dairy,2026-09-15,12,each,Cooler 2,1,gal,Sysco,2.50,4.99,2026-08-01\r\n' +
+    'RedBull 12oz,611269003727,Drinks,2026-10-01,24,case,Cooler 5,12,oz,PepsiCo,1.25,2.99,2026-08-01\r\n';
 
   document.getElementById('downloadTemplateBtn').addEventListener('click', () => {
     const blob = new Blob([IMPORT_TEMPLATE_CSV], { type: 'text/csv' });
@@ -2111,6 +2300,9 @@
   function getLocations() {
     return Array.from(new Set(items.map(i => i.location).filter(Boolean))).sort();
   }
+  function getVendors() {
+    return Array.from(new Set(items.map(i => i.vendor).filter(Boolean))).sort();
+  }
   function todayDateStr() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
@@ -2118,6 +2310,10 @@
   function populateLocationDatalist() {
     document.getElementById('knownLocationsList').innerHTML =
       getLocations().map(l => `<option value="${esc(l)}"></option>`).join('');
+  }
+  function populateVendorDatalist() {
+    document.getElementById('knownVendorsList').innerHTML =
+      getVendors().map(v => `<option value="${esc(v)}"></option>`).join('');
   }
   function categoryById(id) {
     return categories.find(c => c.id === id) || null;
@@ -2231,6 +2427,16 @@
         const marginPct = it.costPrice ? Math.round(((it.sellingPrice - it.costPrice) / it.sellingPrice) * 100) : null;
         priceLine = `<div class="tag-price">$${Number(it.sellingPrice).toFixed(2)}${it.costPrice ? ` <span class="tag-price-cost">(cost $${Number(it.costPrice).toFixed(2)}${marginPct !== null ? `, ${marginPct}% margin` : ''})</span>` : ''}</div>`;
       }
+      let markdownLine = '';
+      const itemUrgency = urgency(it.expirationDate);
+      if (it.sellingPrice && (itemUrgency === 'critical' || itemUrgency === 'soon')) {
+        const discountPct = itemUrgency === 'critical' ? 40 : 20;
+        let markdownPrice = it.sellingPrice * (1 - discountPct / 100);
+        if (it.costPrice && markdownPrice < it.costPrice) markdownPrice = it.costPrice; // never auto-suggest below cost
+        if (markdownPrice < it.sellingPrice - 0.005) {
+          markdownLine = `<div class="tag-markdown">Clearance idea: $${markdownPrice.toFixed(2)} <span class="tag-markdown-pct">(${discountPct}% off, to help it move before it expires)</span></div>`;
+        }
+      }
       return `
       <div class="tag-card">
         <div class="tag-band" style="background:${meta.band}"></div>
@@ -2245,6 +2451,7 @@
           <div class="tag-upc">${esc(upcLabel)} ${sizeLabel}</div>
           <div class="tag-loc">${locationPin()} ${esc(it.location)}</div>
           ${priceLine}
+          ${markdownLine}
           <div class="tag-bottom">
             <div>
               <div class="tag-date">${formatDate(it.expirationDate)}</div>
@@ -2264,6 +2471,9 @@
             <button type="button" class="del-btn" data-id="${it.id}">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
             </button>
+            <button type="button" class="label-btn" data-id="${it.id}" title="Print label">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
+            </button>
 
           </div>
         </div>
@@ -2273,6 +2483,10 @@
     grid.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', () => openModal(btn.dataset.id)));
     grid.querySelectorAll('.del-btn').forEach(btn => btn.addEventListener('click', () => handleDeleteClick(btn)));
     grid.querySelectorAll('.sell-btn').forEach(btn => btn.addEventListener('click', () => handleQuickSell(btn)));
+    grid.querySelectorAll('.label-btn').forEach(btn => btn.addEventListener('click', () => {
+      const item = items.find(i => i.id === btn.dataset.id);
+      if (item) printLabels([item]);
+    }));
   }
 
   let pendingDeleteId = null;
@@ -2525,6 +2739,8 @@
     document.getElementById('locInput').value = item ? item.location : '';
     populateLocationDatalist();
     document.getElementById('datePurchasedInput').value = item ? (item.datePurchased || '') : todayDateStr();
+    document.getElementById('vendorInput').value = item ? (item.vendor || '') : '';
+    populateVendorDatalist();
     populateCategorySelect();
     document.getElementById('categoryInput').value = item && item.categoryId ? item.categoryId : '';
     document.getElementById('sizeValueInput').value = item && item.sizeValue !== null && item.sizeValue !== undefined ? item.sizeValue : '';
@@ -2569,6 +2785,8 @@
     document.getElementById('locInput').value = '';
     populateLocationDatalist();
     document.getElementById('datePurchasedInput').value = todayDateStr();
+    document.getElementById('vendorInput').value = '';
+    populateVendorDatalist();
     populateCategorySelect();
     document.getElementById('categoryInput').value = '';
     document.getElementById('sizeValueInput').value = pending.sizeValue !== null && pending.sizeValue !== undefined ? pending.sizeValue : '';
@@ -2618,6 +2836,7 @@
     const costPriceRaw = document.getElementById('costPriceInput').value;
     const sellingPriceRaw = document.getElementById('sellingPriceInput').value;
     const datePurchased = document.getElementById('datePurchasedInput').value || null;
+    const vendor = document.getElementById('vendorInput').value.trim() || null;
     const batches = getBatchRows();
     const errEl = document.getElementById('formError');
 
@@ -2660,6 +2879,7 @@
       costPrice: costPriceRaw === '' ? null : Number(costPriceRaw),
       sellingPrice: sellingPriceRaw === '' ? null : Number(sellingPriceRaw),
       datePurchased,
+      vendor,
     };
     const submitBtn = document.getElementById('submitBtn');
     const originalLabel = submitBtn.textContent;

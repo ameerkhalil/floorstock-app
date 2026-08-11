@@ -104,6 +104,21 @@ database, and a browser frontend.
   appears in the header whenever there's a queue; open it to fill in the expiration
   date, quantity, and location for each one (or discard a bad scan), which is the only
   thing that actually turns it into a real item on the floor.
+- **Vendor/supplier tracking** — an optional field on every item, autocompleting from
+  vendors you've already used, included in CSV export/import.
+- **Markdown/clearance pricing suggestions** — items that are critical or soon
+  (per your configured thresholds) and have a selling price set show a suggested
+  markdown price on their card, to help move them before they expire instead of
+  losing the full value. Suggestions never go below cost price.
+- **Cross-location dashboard** — for organizations with more than one store, an
+  "All locations" header button shows combined totals (items, expiring counts,
+  inventory value, 30-day shrink) and a per-location breakdown you can click into to
+  switch locations directly.
+- **Printable shelf labels** — the "Print labels" toolbar button prints a label (name,
+  price, expiration date, and a real scannable barcode) for every item currently shown
+  by your filters; a small printer icon on each item card prints just that one. Items
+  without a real UPC still get a scannable CODE128 barcode generated from their
+  internal placeholder code.
 
 ### Important: existing data isn't tied to a store
 
@@ -358,6 +373,7 @@ on login/registration and required on the routes marked "auth".
 | POST   | `/api/pending-items`          | any      | Queue a scanned UPC; body `{ upc }`        |
 | DELETE | `/api/pending-items/:id`      | any      | Discard a pending scan                     |
 | POST   | `/api/pending-items/:id/complete` | any  | Turn a pending scan into a real item; same body shape as `POST /api/items` |
+| GET    | `/api/org/dashboard`          | manager  | Combined totals + per-location breakdown across the organization |
 | PUT    | `/api/items/:id`              | any      | Update an item                             |
 | DELETE | `/api/items/:id`              | any      | Delete an item; body `{ reason }` (sold/expired/other) |
 
