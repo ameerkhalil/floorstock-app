@@ -15,6 +15,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
   :root {
     --bg: #EDEFF1;
@@ -410,6 +411,10 @@
         <button class="btn-ghost" id="printLabelsBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
           Print labels
+        </button>
+        <button class="btn-ghost" id="shelfQrBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="17.5" y1="14" x2="17.5" y2="17.5"/><line x1="14" y1="17.5" x2="21" y2="17.5"/></svg>
+          Shelf QR
         </button>
         <button class="btn-ghost" id="workersBtn" style="display:none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -818,6 +823,28 @@
   </div>
 
   <!-- bulk CSV import modal -->
+  <!-- shelf QR labels modal -->
+  <div class="modal-overlay" id="shelfQrOverlay">
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">SHELF QR LABELS</div>
+        <button class="modal-close" id="shelfQrCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <p style="font-size:13px; color:var(--muted-2); line-height:1.6; margin-top:0; margin-bottom:14px;">
+          Print a QR code for a shelf or cooler. Scanning it opens FloorStock filtered
+          to everything stocked there, sorted by what's expiring soonest &mdash; a fast way
+          to check one spot without hunting through the whole floor.
+        </p>
+        <div id="shelfQrList" style="display:flex; flex-direction:column; gap:8px; margin-bottom:14px;"></div>
+        <div id="shelfQrEmpty" style="font-size:13px; color:var(--muted); display:none; margin-bottom:14px;">No locations yet &mdash; add some items first.</div>
+        <button type="button" class="submit-btn" id="printAllShelfQrBtn">Print all</button>
+      </div>
+    </div>
+  </div>
+
   <!-- invoice import modal -->
   <div class="modal-overlay" id="invoiceImportOverlay">
     <div class="modal" style="max-width:440px;">
@@ -1668,6 +1695,7 @@
     }
     items.push({ id: 'exportBtn', label: 'Export inventory', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>' });
     items.push({ id: 'printLabelsBtn', label: 'Print labels', icon: '<path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>' });
+    items.push({ id: 'shelfQrBtn', label: 'Shelf QR labels', icon: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="17.5" y1="14" x2="17.5" y2="17.5"/><line x1="14" y1="17.5" x2="21" y2="17.5"/>' });
     if (document.getElementById('workersBtn').style.display === 'flex') {
       items.push({ id: 'workersBtn', label: 'Manage', icon: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>' });
     }
@@ -2423,8 +2451,118 @@
   });
 
   // =====================================================================
-  // LOCATIONS (multi-store organizations)
+  // SHELF QR LABELS
   // =====================================================================
+
+  function shelfUrlFor(location) {
+    return `${window.location.origin}/?shelf=${encodeURIComponent(location)}`;
+  }
+
+  function openShelfQrModal() {
+    const locations = getLocations();
+    const listEl = document.getElementById('shelfQrList');
+    const emptyEl = document.getElementById('shelfQrEmpty');
+    const printAllBtn = document.getElementById('printAllShelfQrBtn');
+    if (locations.length === 0) {
+      listEl.innerHTML = '';
+      emptyEl.style.display = 'block';
+      printAllBtn.style.display = 'none';
+    } else {
+      emptyEl.style.display = 'none';
+      printAllBtn.style.display = 'block';
+      listEl.innerHTML = locations.map(loc => `
+        <div class="location-row" style="cursor:default;">
+          <span>${esc(loc)}</span>
+          <button type="button" class="add-worker-btn" data-print-shelf="${esc(loc)}" style="padding:6px 12px; font-size:12px; width:auto;">Print</button>
+        </div>
+      `).join('');
+      listEl.querySelectorAll('[data-print-shelf]').forEach(btn => {
+        btn.addEventListener('click', () => printShelfQrLabels([btn.dataset.printShelf]));
+      });
+    }
+    document.getElementById('shelfQrOverlay').classList.add('open');
+  }
+  document.getElementById('shelfQrBtn').addEventListener('click', openShelfQrModal);
+  document.getElementById('shelfQrCloseBtn').addEventListener('click', () => {
+    document.getElementById('shelfQrOverlay').classList.remove('open');
+  });
+  document.getElementById('shelfQrOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'shelfQrOverlay') document.getElementById('shelfQrOverlay').classList.remove('open');
+  });
+  document.getElementById('printAllShelfQrBtn').addEventListener('click', () => {
+    printShelfQrLabels(getLocations());
+  });
+
+  function printShelfQrLabels(locations) {
+    if (!locations || locations.length === 0) {
+      showToast('Nothing to print');
+      return;
+    }
+    const win = window.open('', '_blank');
+    if (!win) {
+      showToast('Pop-up blocked \u2014 allow pop-ups for this site to print labels');
+      return;
+    }
+
+    const labelsHtml = locations.map((loc, i) => `
+      <div class="shelf-label">
+        <canvas id="qr-${i}"></canvas>
+        <div class="shelf-label-name">${esc(loc)}</div>
+        <div class="shelf-label-sub">Scan for what's expiring here</div>
+      </div>
+    `).join('');
+
+    win.document.write(`<!DOCTYPE html>
+<html>
+<head>
+<title>FloorStock Shelf QR Labels</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\/script>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
+  .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+  .shelf-label { border: 1px dashed #999; border-radius: 6px; padding: 12px 8px; text-align: center; page-break-inside: avoid; }
+  .shelf-label canvas { width: 100%; height: auto; max-width: 140px; }
+  .shelf-label-name { font-size: 13px; font-weight: 700; margin-top: 6px; }
+  .shelf-label-sub { font-size: 10px; color: #666; margin-top: 2px; }
+  @media print { .shelf-label { border: 1px solid #ccc; } }
+</style>
+</head>
+<body>
+  <div class="label-grid">${labelsHtml}</div>
+</body>
+</html>`);
+    win.document.close();
+
+    win.onload = () => {
+      locations.forEach((loc, i) => {
+        const canvas = win.document.getElementById('qr-' + i);
+        try {
+          win.QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 });
+        } catch (e) { /* leave that one label without a code if generation fails */ }
+      });
+      setTimeout(() => win.print(), 400);
+    };
+  }
+
+  // If the page was opened from a shelf QR label, filter straight to that
+  // location once the store's items are loaded (works whether the person
+  // was already signed in or has to sign in first).
+  function applyShelfDeepLinkIfPresent() {
+    const params = new URLSearchParams(window.location.search);
+    const shelf = params.get('shelf');
+    if (!shelf) return;
+    const sel = document.getElementById('locationFilter');
+    if (Array.from(sel.options).some(o => o.value === shelf)) {
+      sel.value = shelf;
+    } else {
+      return; // location no longer exists at this store — just show everything instead
+    }
+    document.getElementById('sortBy').value = 'expiration';
+    renderGrid();
+    renderDashboard();
+    showToast(`Showing items in: ${shelf}`);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  }
 
   async function openLocationsModal() {
     document.getElementById('locationsOverlay').classList.add('open');
@@ -4012,6 +4150,7 @@
 
   async function init() {
     await loadStoreData();
+    applyShelfDeepLinkIfPresent();
     setInterval(poll, POLL_INTERVAL_MS);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
   }

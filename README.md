@@ -149,6 +149,12 @@ database, and a browser frontend.
   automatically; you review and complete each one with an expiration date and location
   yourself. Optional, and costs a small amount per invoice processed (see setup below).
 
+- **QR shelf labels** — the "Shelf QR" header button prints a QR code per location
+  (Cooler 5, Aisle 4, etc.). Scanning one with a phone camera opens FloorStock filtered
+  straight to that shelf, sorted by soonest-expiring first — a fast way to check one
+  spot without hunting through the whole floor. Works whether the person is already
+  signed in or needs to sign in first; the filter applies right after.
+
 ### Setting up invoice import (optional, small ongoing cost)
 
 1. Get an API key at [console.anthropic.com](https://console.anthropic.com) — this is
