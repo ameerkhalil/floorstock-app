@@ -97,6 +97,13 @@ database, and a browser frontend.
 - **"No barcode" items** — some products don't have a UPC. Check "This item doesn't
   have a barcode" in the New Tag form to skip the UPC field entirely; the item shows
   "No barcode" instead of a blank or fake code.
+- **Bulk scan** — the "Bulk scan" header button opens continuous scanning: scan one
+  barcode after another with no interruption between each. Each scan is queued as a
+  *pending* item (with a name/size auto-filled if the barcode is recognized) and does
+  **not** count toward inventory totals or show up in the grid. A "Pending (N)" badge
+  appears in the header whenever there's a queue; open it to fill in the expiration
+  date, quantity, and location for each one (or discard a bad scan), which is the only
+  thing that actually turns it into a real item on the floor.
 
 ### Important: existing data isn't tied to a store
 
@@ -347,6 +354,10 @@ on login/registration and required on the routes marked "auth".
 | POST   | `/api/items`                  | any      | Create an item                             |
 | POST   | `/api/items/:id/add-quantity` | any      | Add units to an existing batch             |
 | POST   | `/api/items/:id/sell`         | any      | Log a partial sale; body `{ quantity }`    |
+| GET    | `/api/pending-items`          | any      | List queued bulk scans (not real items yet) |
+| POST   | `/api/pending-items`          | any      | Queue a scanned UPC; body `{ upc }`        |
+| DELETE | `/api/pending-items/:id`      | any      | Discard a pending scan                     |
+| POST   | `/api/pending-items/:id/complete` | any  | Turn a pending scan into a real item; same body shape as `POST /api/items` |
 | PUT    | `/api/items/:id`              | any      | Update an item                             |
 | DELETE | `/api/items/:id`              | any      | Delete an item; body `{ reason }` (sold/expired/other) |
 

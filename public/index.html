@@ -371,6 +371,14 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           Sign out
         </button>
+        <button class="btn-ghost" id="pendingItemsBtn" style="display:none; background:rgba(245,166,35,0.14); color:var(--amber);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+          <span id="pendingItemsCount">0</span> pending
+        </button>
+        <button class="btn-ghost" id="bulkScanBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+          Bulk scan
+        </button>
         <button class="btn-primary" id="newTagBtn">
           <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
           New tag
@@ -413,7 +421,7 @@
           </div>
           <div class="onboarding-step" id="onboardingStepWorker">
             <span class="onboarding-check"></span>
-            <span>Invite a worker from Manage \u2192 Workers</span>
+            <span>Invite a worker from Manage &rarr; Workers</span>
           </div>
         </div>
       </div>
@@ -584,6 +592,57 @@
   </div>
 
   <!-- locations (multi-store) modal -->
+  <!-- bulk scan modal -->
+  <div class="modal-overlay" id="bulkScanOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">BULK SCAN</div>
+        <button class="modal-close" id="bulkScanCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <p style="font-size:13px; color:var(--muted-2); line-height:1.5; margin-top:0; margin-bottom:12px;">
+          Scan barcodes one after another &mdash; each one is queued as a pending scan. None of
+          these count as inventory yet; fill in the expiration date, quantity, and location
+          for each one afterward to add it to the floor.
+        </p>
+        <button type="button" class="scan-btn" id="bulkScanToggleBtn" style="width:100%; justify-content:center; padding:10px 0; margin-bottom:6px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+          <span id="bulkScanToggleLabel">Start scanning</span>
+        </button>
+        <video id="bulkScanVideo" muted playsinline></video>
+        <div class="scan-error" id="bulkScanError" style="display:none;"></div>
+        <div class="upc-row" style="margin-top:10px;">
+          <input class="field-input mono" id="bulkScanManualInput" placeholder="Or type a UPC and press Enter">
+        </div>
+        <div class="section-label">Scanned this session (<span id="bulkScanSessionCount">0</span>)</div>
+        <div id="bulkScanSessionList" style="max-height:220px; overflow-y:auto; display:flex; flex-direction:column; gap:6px;"></div>
+        <button type="button" class="submit-btn" id="bulkScanDoneBtn" style="margin-top:16px;">Done &mdash; review pending scans</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- pending items modal -->
+  <div class="modal-overlay" id="pendingItemsOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">PENDING SCANS</div>
+        <button class="modal-close" id="pendingItemsCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <p style="font-size:13px; color:var(--muted-2); line-height:1.5; margin-top:0; margin-bottom:14px;">
+          These were scanned but aren't on the floor yet &mdash; complete each one with an
+          expiration date, quantity, and location, or discard it if it was scanned by mistake.
+        </p>
+        <div id="pendingItemsList" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <div id="pendingItemsEmpty" style="font-size:13px; color:var(--muted); display:none;">Nothing pending right now.</div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="locationsOverlay">
     <div class="modal" style="max-width:440px;">
       <div class="modal-header">
@@ -854,6 +913,8 @@
   let items = [];
   let categories = [];
   let editingId = null;
+  let completingPendingId = null;
+  let pendingItems = [];
   let currentUser = null; // { role, username, store }
   let isSubmitting = false;
   let lookupTimer = null;
@@ -1080,6 +1141,7 @@
     checkAdminAccess();
     loadOnboardingState();
     loadUrgencyThresholds();
+    loadPendingItems();
     init();
   }
 
@@ -2448,6 +2510,7 @@
 
   function openModal(id) {
     editingId = id || null;
+    completingPendingId = null;
     const item = editingId ? items.find(i => i.id === editingId) : null;
 
     document.getElementById('modalTitle').textContent = item ? 'EDIT TAG' : 'NEW TAG';
@@ -2485,10 +2548,55 @@
     hideBatchPanel();
     document.getElementById('modalOverlay').classList.add('open');
   }
+
+  function openPendingCompletion(pendingId) {
+    const pending = pendingItems.find(p => p.id === pendingId);
+    if (!pending) { showToast('That pending scan is gone'); return; }
+    editingId = null;
+    completingPendingId = pendingId;
+
+    document.getElementById('modalTitle').textContent = 'COMPLETE SCAN';
+    document.getElementById('submitBtn').textContent = 'Add to floor';
+    document.getElementById('editId').value = '';
+    document.getElementById('upcInput').value = pending.upc;
+    document.getElementById('upcInput').disabled = true;
+    document.getElementById('scanBtn').style.display = 'none';
+    document.getElementById('noUpcCheckbox').checked = false;
+    document.getElementById('noUpcCheckbox').closest('label').style.display = 'none';
+    document.getElementById('nameInput').value = pending.name || '';
+    resetBatchRows('', '', true);
+    document.getElementById('unitInput').value = 'each';
+    document.getElementById('locInput').value = '';
+    populateLocationDatalist();
+    document.getElementById('datePurchasedInput').value = todayDateStr();
+    populateCategorySelect();
+    document.getElementById('categoryInput').value = '';
+    document.getElementById('sizeValueInput').value = pending.sizeValue !== null && pending.sizeValue !== undefined ? pending.sizeValue : '';
+    document.getElementById('sizeUnitInput').value = pending.sizeUnit || '';
+    document.getElementById('costPriceInput').value = '';
+    document.getElementById('sellingPriceInput').value = '';
+    sellingPriceManuallyEdited = false;
+    document.getElementById('targetMarginInput').value = 50;
+    document.getElementById('priceSuggestNote').style.display = 'none';
+    document.getElementById('marketPriceNote').style.display = 'none';
+    document.getElementById('sizeAutoNote').style.display = 'none';
+    document.getElementById('inlineCategoryForm').style.display = 'none';
+    document.getElementById('inlineCategoryName').value = '';
+    document.getElementById('formError').style.display = 'none';
+    document.getElementById('scanError').style.display = 'none';
+    hideLookupNote();
+    hideBatchPanel();
+    document.getElementById('modalOverlay').classList.add('open');
+  }
+
   function closeModal() {
     stopScan();
     document.getElementById('modalOverlay').classList.remove('open');
     editingId = null;
+    completingPendingId = null;
+    document.getElementById('upcInput').disabled = false;
+    document.getElementById('scanBtn').style.display = 'flex';
+    document.getElementById('noUpcCheckbox').closest('label').style.display = 'flex';
   }
   document.getElementById('newTagBtn').addEventListener('click', () => openModal(null));
   document.getElementById('emptyAddBtn').addEventListener('click', () => openModal(null));
@@ -2567,6 +2675,22 @@
         });
         items = items.map(i => i.id === editingId ? updated : i);
         showToast('Tag updated');
+      } else if (completingPendingId) {
+        const firstData = { ...sharedFields, expirationDate: batches[0].expirationDate, quantity: Number(batches[0].quantity) };
+        const created = await apiRequest(`/api/pending-items/${completingPendingId}/complete`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(firstData),
+        });
+        items.push(created);
+        pendingItems = pendingItems.filter(p => p.id !== completingPendingId);
+        for (const b of batches.slice(1)) {
+          const data = { ...sharedFields, expirationDate: b.expirationDate, quantity: Number(b.quantity) };
+          const extra = await apiRequest(API_BASE, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+          });
+          items.push(extra);
+        }
+        renderPendingBadge();
+        showToast(batches.length > 1 ? `Added ${batches.length} batches to floor` : 'Added to floor');
       } else if (batches.length === 1) {
         const data = { ...sharedFields, expirationDate: batches[0].expirationDate, quantity: Number(batches[0].quantity) };
         const created = await apiRequest(API_BASE, {
@@ -2805,6 +2929,218 @@
   }
 
   document.getElementById('scanBtn').addEventListener('click', () => { scanning ? stopScan() : startScan(); });
+
+  // =====================================================================
+  // PENDING ITEMS (bulk scan queue — never counted in inventory totals
+  // until completed with an expiration date, quantity, and location)
+  // =====================================================================
+
+  async function loadPendingItems() {
+    try {
+      pendingItems = await apiRequest('/api/pending-items');
+      renderPendingBadge();
+    } catch (e) {
+      // non-fatal — the badge just won't update this time
+    }
+  }
+
+  function renderPendingBadge() {
+    const btn = document.getElementById('pendingItemsBtn');
+    document.getElementById('pendingItemsCount').textContent = pendingItems.length;
+    btn.style.display = pendingItems.length > 0 ? 'flex' : 'none';
+  }
+
+  async function openPendingItemsModal() {
+    await loadPendingItems();
+    renderPendingItemsList();
+    document.getElementById('pendingItemsOverlay').classList.add('open');
+  }
+  document.getElementById('pendingItemsBtn').addEventListener('click', openPendingItemsModal);
+  document.getElementById('pendingItemsCloseBtn').addEventListener('click', () => {
+    document.getElementById('pendingItemsOverlay').classList.remove('open');
+  });
+  document.getElementById('pendingItemsOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'pendingItemsOverlay') document.getElementById('pendingItemsOverlay').classList.remove('open');
+  });
+
+  function renderPendingItemsList() {
+    const listEl = document.getElementById('pendingItemsList');
+    const emptyEl = document.getElementById('pendingItemsEmpty');
+    if (pendingItems.length === 0) {
+      listEl.innerHTML = '';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    listEl.innerHTML = pendingItems.map(p => `
+      <div style="display:flex; align-items:center; justify-content:space-between; background:var(--surface); border-radius:8px; padding:10px 12px; gap:10px;">
+        <div style="min-width:0;">
+          <div style="font-weight:600; font-size:13.5px;">${esc(p.name || 'Unrecognized product')}</div>
+          <div class="mono" style="color:var(--muted); font-size:11.5px; margin-top:2px;">${esc(p.upc)}${p.sizeValue ? ` \u00b7 ${esc(p.sizeValue)} ${esc(p.sizeUnit || '')}` : ''}</div>
+        </div>
+        <div class="tag-actions" style="margin-top:0; border-top:none; padding-top:0; flex-shrink:0;">
+          <button type="button" class="edit-btn" data-complete-id="${p.id}">Complete</button>
+          <button type="button" class="del-btn" data-discard-id="${p.id}">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+      </div>
+    `).join('');
+    listEl.querySelectorAll('[data-complete-id]').forEach(btn => {
+      btn.addEventListener('click', () => {
+        document.getElementById('pendingItemsOverlay').classList.remove('open');
+        openPendingCompletion(btn.dataset.completeId);
+      });
+    });
+    listEl.querySelectorAll('[data-discard-id]').forEach(btn => {
+      btn.addEventListener('click', () => discardPendingItem(btn.dataset.discardId));
+    });
+  }
+
+  async function discardPendingItem(id) {
+    try {
+      await apiRequest(`/api/pending-items/${id}`, { method: 'DELETE' });
+      pendingItems = pendingItems.filter(p => p.id !== id);
+      renderPendingBadge();
+      renderPendingItemsList();
+      showToast('Discarded');
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t discard that scan');
+    }
+  }
+
+  // =====================================================================
+  // BULK SCAN (scan continuously, queue each one as a pending item)
+  // =====================================================================
+
+  let bulkZxingReader = null;
+  let bulkScanning = false;
+  let bulkLastScanUpc = null;
+  let bulkLastScanTime = 0;
+  let bulkScanSessionItems = [];
+
+  function openBulkScanModal() {
+    bulkScanSessionItems = [];
+    renderBulkScanSessionList();
+    document.getElementById('bulkScanError').style.display = 'none';
+    document.getElementById('bulkScanManualInput').value = '';
+    document.getElementById('bulkScanOverlay').classList.add('open');
+  }
+  document.getElementById('bulkScanBtn').addEventListener('click', openBulkScanModal);
+
+  function closeBulkScanModal() {
+    stopBulkScan();
+    document.getElementById('bulkScanOverlay').classList.remove('open');
+  }
+  document.getElementById('bulkScanCloseBtn').addEventListener('click', closeBulkScanModal);
+  document.getElementById('bulkScanOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'bulkScanOverlay') closeBulkScanModal();
+  });
+  document.getElementById('bulkScanDoneBtn').addEventListener('click', async () => {
+    closeBulkScanModal();
+    await loadPendingItems();
+    openPendingItemsModal();
+  });
+
+  function stopBulkScan() {
+    bulkScanning = false;
+    if (bulkZxingReader) { try { bulkZxingReader.reset(); } catch (e) {} }
+    const video = document.getElementById('bulkScanVideo');
+    video.classList.remove('on');
+    if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
+    document.getElementById('bulkScanToggleBtn').classList.remove('active');
+    document.getElementById('bulkScanToggleLabel').textContent = 'Start scanning';
+  }
+
+  async function startBulkScan() {
+    const errEl = document.getElementById('bulkScanError');
+    errEl.style.display = 'none';
+
+    if (typeof ZXing === 'undefined') {
+      errEl.textContent = 'Scanner failed to load \u2014 check your connection, or type a UPC below.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      errEl.textContent = 'This browser doesn\u2019t support camera access \u2014 type a UPC below.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    const video = document.getElementById('bulkScanVideo');
+    video.classList.add('on');
+    bulkScanning = true;
+    document.getElementById('bulkScanToggleBtn').classList.add('active');
+    document.getElementById('bulkScanToggleLabel').textContent = 'Stop scanning';
+
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.CODE_128,
+    ]);
+    bulkZxingReader = new ZXing.BrowserMultiFormatReader(hints);
+    const constraints = { video: { facingMode: { ideal: 'environment' } } };
+
+    bulkZxingReader.decodeFromConstraints(constraints, video, (result, err) => {
+      if (result && bulkScanning) {
+        const upc = result.getText();
+        const now = Date.now();
+        // Debounce: ignore the same barcode if it's still in frame from the last scan
+        if (upc === bulkLastScanUpc && (now - bulkLastScanTime) < 2500) return;
+        bulkLastScanUpc = upc;
+        bulkLastScanTime = now;
+        addBulkScannedUpc(upc);
+      }
+    }).catch((e) => {
+      let msg = 'Camera access was blocked or unavailable \u2014 type a UPC below.';
+      if (e && e.name === 'NotAllowedError') {
+        msg = 'Camera permission was denied. On iPhone: Settings \u2192 Safari \u2192 Camera \u2192 Allow, then try again.';
+      } else if (e && e.name === 'NotFoundError') {
+        msg = 'No camera found on this device \u2014 type a UPC below.';
+      }
+      errEl.textContent = msg;
+      errEl.style.display = 'block';
+      stopBulkScan();
+    });
+  }
+  document.getElementById('bulkScanToggleBtn').addEventListener('click', () => { bulkScanning ? stopBulkScan() : startBulkScan(); });
+
+  document.getElementById('bulkScanManualInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      const val = e.target.value.trim();
+      if (val) { addBulkScannedUpc(val); e.target.value = ''; }
+    }
+  });
+
+  async function addBulkScannedUpc(upc) {
+    const tempId = 'temp-' + Date.now() + Math.random().toString(36).slice(2, 6);
+    bulkScanSessionItems.unshift({ id: tempId, upc, name: null, loading: true });
+    renderBulkScanSessionList();
+    try {
+      const created = await apiRequest('/api/pending-items', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ upc }),
+      });
+      const idx = bulkScanSessionItems.findIndex(i => i.id === tempId);
+      if (idx !== -1) bulkScanSessionItems[idx] = created;
+      renderBulkScanSessionList();
+    } catch (e) {
+      bulkScanSessionItems = bulkScanSessionItems.filter(i => i.id !== tempId);
+      renderBulkScanSessionList();
+      showToast(e.message || 'Couldn\u2019t queue that scan');
+    }
+  }
+
+  function renderBulkScanSessionList() {
+    document.getElementById('bulkScanSessionCount').textContent = bulkScanSessionItems.length;
+    document.getElementById('bulkScanSessionList').innerHTML = bulkScanSessionItems.map(i => `
+      <div style="display:flex; align-items:center; justify-content:space-between; background:var(--surface); border-radius:7px; padding:8px 12px; font-size:13px;">
+        <span>${i.loading ? 'Looking up\u2026' : esc(i.name || 'Unrecognized product')}</span>
+        <span class="mono" style="color:var(--muted); font-size:11.5px;">${esc(i.upc)}</span>
+      </div>
+    `).join('');
+  }
 
   // =====================================================================
   // TOOLBAR + ALERT WIRING

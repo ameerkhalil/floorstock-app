@@ -210,6 +210,21 @@ db.exec(`
     sold_by TEXT,
     sold_at TEXT NOT NULL
   );
+
+  -- Bulk scan queue: a fast scan only records the UPC (and a name/size if the
+  -- lookup found one). It never becomes a real item — and never counts toward
+  -- inventory totals — until someone fills in the required expiration date,
+  -- quantity, and location and "completes" it.
+  CREATE TABLE IF NOT EXISTS pending_items (
+    id TEXT PRIMARY KEY,
+    store_id TEXT NOT NULL,
+    upc TEXT NOT NULL,
+    name TEXT,
+    size_value REAL,
+    size_unit TEXT,
+    scanned_by TEXT,
+    scanned_at TEXT NOT NULL
+  );
 `);
 
 // ---------- migrations for older deployments ----------
@@ -1074,13 +1089,9 @@ async function lookupUpcItemDb(upc) {
   }
 }
 
-app.get('/api/upc-lookup/:upc', requireAuth, requireActiveSubscription, async (req, res) => {
-  const upc = String(req.params.upc || '').trim();
-  if (!upc) return res.status(400).json({ error: 'UPC is required.' });
-
-  // Cache hit — instant, free, no external calls at all.
+async function performUpcLookup(upc) {
   const cached = getCachedUpc(upc);
-  if (cached) return res.json(cached);
+  if (cached) return cached;
 
   const variants = upcVariants(upc);
   const sources = [lookupOpenFoodFacts, lookupUsda, lookupUpcItemDb];
@@ -1089,13 +1100,18 @@ app.get('/api/upc-lookup/:upc', requireAuth, requireActiveSubscription, async (r
     for (const variant of variants) {
       const result = await source(variant);
       if (result) {
-        cacheUpcResult(upc, result); // cache under the originally scanned code
-        return res.json({ found: true, ...result });
+        cacheUpcResult(upc, result);
+        return { found: true, ...result };
       }
     }
   }
+  return { found: false };
+}
 
-  res.json({ found: false });
+app.get('/api/upc-lookup/:upc', requireAuth, requireActiveSubscription, async (req, res) => {
+  const upc = String(req.params.upc || '').trim();
+  if (!upc) return res.status(400).json({ error: 'UPC is required.' });
+  res.json(await performUpcLookup(upc));
 });
 
 // =====================================================================
@@ -1466,6 +1482,84 @@ app.delete('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) 
 
   logAudit(req.auth.storeId, currentUsername(req), 'item_removed', `Removed "${existing.name}" (${existing.quantity} ${existing.unit}) from ${existing.location} \u2014 ${reason}`);
   res.status(204).end();
+});
+
+// =====================================================================
+// BULK SCAN QUEUE (scan fast now, fill in details later — pending items
+// never count toward inventory totals until completed into a real item)
+// =====================================================================
+
+function rowToPendingItem(row) {
+  return {
+    id: row.id,
+    upc: row.upc,
+    name: row.name || null,
+    sizeValue: row.size_value === null || row.size_value === undefined ? null : row.size_value,
+    sizeUnit: row.size_unit || null,
+    scannedBy: row.scanned_by || null,
+    scannedAt: row.scanned_at,
+  };
+}
+
+app.get('/api/pending-items', requireAuth, requireActiveSubscription, (req, res) => {
+  const rows = db.prepare('SELECT * FROM pending_items WHERE store_id = ? ORDER BY scanned_at DESC').all(req.auth.storeId);
+  res.json(rows.map(rowToPendingItem));
+});
+
+app.post('/api/pending-items', requireAuth, requireActiveSubscription, async (req, res) => {
+  const upc = String((req.body && req.body.upc) || '').trim();
+  if (!upc) return res.status(400).json({ error: 'UPC is required.' });
+
+  const lookup = await performUpcLookup(upc);
+  const id = newId();
+  db.prepare(`
+    INSERT INTO pending_items (id, store_id, upc, name, size_value, size_unit, scanned_by, scanned_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, req.auth.storeId, upc, lookup.found ? lookup.name : null,
+    lookup.found ? (lookup.sizeValue ?? null) : null, lookup.found ? (lookup.sizeUnit || null) : null,
+    currentUsername(req), nowIso()
+  );
+
+  const row = db.prepare('SELECT * FROM pending_items WHERE id = ?').get(id);
+  res.status(201).json(rowToPendingItem(row));
+});
+
+app.delete('/api/pending-items/:id', requireAuth, requireActiveSubscription, (req, res) => {
+  const existing = db.prepare('SELECT * FROM pending_items WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!existing) return res.status(404).json({ error: 'Pending scan not found.' });
+  db.prepare('DELETE FROM pending_items WHERE id = ?').run(req.params.id);
+  res.status(204).end();
+});
+
+// Fill in the missing required details and turn a pending scan into a real
+// item. Uses the exact same validation as a normal add.
+app.post('/api/pending-items/:id/complete', requireAuth, requireActiveSubscription, (req, res) => {
+  const pending = db.prepare('SELECT * FROM pending_items WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!pending) return res.status(404).json({ error: 'Pending scan not found.' });
+
+  const error = validatePayload(req.body);
+  if (error) return res.status(400).json({ error });
+
+  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit, costPrice, sellingPrice, datePurchased } = req.body;
+  const id = newId();
+  const dateAdded = nowIso();
+
+  db.prepare(`
+    INSERT INTO items (id, store_id, upc, name, expiration_date, quantity, unit, location, date_added, category_id, size_value, size_unit, cost_price, selling_price, date_purchased)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    id, req.auth.storeId, upc.trim(), name.trim(), expirationDate, quantity, unit.trim(), location.trim(), dateAdded,
+    categoryId || null, (sizeValue === '' || sizeValue === undefined) ? null : sizeValue, sizeUnit || null,
+    (costPrice === '' || costPrice === undefined) ? null : costPrice, (sellingPrice === '' || sellingPrice === undefined) ? null : sellingPrice,
+    (datePurchased === '' || datePurchased === undefined) ? null : datePurchased
+  );
+  db.prepare('DELETE FROM pending_items WHERE id = ?').run(pending.id);
+
+  logAudit(req.auth.storeId, currentUsername(req), 'item_added', `Added ${quantity} ${unit.trim()} of "${name.trim()}" at ${location.trim()} (from bulk scan)`);
+
+  const row = db.prepare('SELECT * FROM items WHERE id = ?').get(id);
+  res.status(201).json(rowToItem(row));
 });
 
 // =====================================================================
