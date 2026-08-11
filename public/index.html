@@ -23,7 +23,9 @@
     --border: #C7CDD3;
     --border-light: #E2E6E9;
     --card-border: #EEF0F2;
-    --accent: #2D5F8A;
+    --accent: #2E6EFF;
+    --teal: #14C4B2;
+    --brand-gradient: linear-gradient(135deg, #2E6EFF, #14C4B2);
     --amber: #F5A623;
     --surface: #F3F5F6;
     --expired-band: #C1443C; --expired-tint: #FBEAE8; --expired-text: #8C2E27;
@@ -52,8 +54,10 @@
   @media (max-width: 860px) { .landing-intro { text-align: center; max-width: 440px; } .landing-features { align-items: center; } .landing-feature { justify-content: center; } }
   .auth-card { background: #fff; border-radius: 12px; padding: 32px 28px; width: 100%; max-width: 420px; box-shadow: 0 4px 24px rgba(28,37,48,0.12); border: 1px solid var(--border-light); }
   .auth-logo { display: flex; align-items: center; gap: 10px; margin-bottom: 22px; }
-  .auth-logo-icon { width: 34px; height: 34px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .auth-logo-icon { width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
+  .auth-logo-icon img { width: 100%; height: 100%; object-fit: contain; }
   .auth-logo-title { font-family: 'Oswald', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 0.5px; }
+  .brand-wordmark-stock { background: var(--brand-gradient); -webkit-background-clip: text; background-clip: text; color: transparent; }
   .auth-tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 8px; padding: 4px; margin-bottom: 20px; }
   .auth-tab { flex: 1; border: none; background: none; padding: 8px 0; border-radius: 6px; font-weight: 600; font-size: 13.5px; color: var(--muted-2); }
   .auth-tab.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(28,37,48,0.12); }
@@ -61,7 +65,7 @@
   .auth-field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted-2); margin-bottom: 5px; }
   .auth-field input { width: 100%; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--border); font-size: 14px; }
   .auth-error { font-size: 13px; color: var(--expired-band); font-weight: 500; margin-bottom: 12px; }
-  .auth-submit { width: 100%; background: var(--accent); color: #fff; border: none; border-radius: 7px; padding: 12px 0; font-weight: 700; font-size: 14.5px; margin-top: 4px; }
+  .auth-submit { width: 100%; background: var(--brand-gradient); color: #fff; border: none; border-radius: 7px; padding: 12px 0; font-weight: 700; font-size: 14.5px; margin-top: 4px; }
   .auth-submit:disabled { opacity: 0.6; }
   .auth-hint { font-size: 12.5px; color: var(--muted); margin-top: 14px; text-align: center; line-height: 1.5; }
   .role-note { display: flex; gap: 8px; align-items: flex-start; background: var(--surface); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; color: var(--muted-2); margin-bottom: 16px; line-height: 1.5; }
@@ -70,11 +74,12 @@
   header { background: var(--ink); color: var(--bg); padding: 18px 20px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
   .header-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .brand { display: flex; align-items: center; gap: 10px; }
-  .brand-icon { width: 34px; height: 34px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .brand-icon { width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
+  .brand-icon img { width: 100%; height: 100%; object-fit: contain; }
   .brand-title { font-family: 'Oswald', sans-serif; font-size: 20px; font-weight: 600; letter-spacing: 0.5px; line-height: 1; }
   .brand-sub { font-size: 11px; color: var(--muted); letter-spacing: 1px; margin-top: 2px; }
   .header-right { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-  .store-pill { font-size: 12.5px; color: var(--bg); background: rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 6px; }
+  .store-pill { font-size: 12.5px; font-family: inherit; color: var(--bg); background: rgba(255,255,255,0.08); border-radius: 6px; padding: 6px 10px; display: flex; align-items: center; gap: 6px; }
   .store-pill .role-badge { background: var(--amber); color: var(--ink); font-weight: 700; font-size: 10.5px; padding: 1px 6px; border-radius: 4px; letter-spacing: 0.4px; text-transform: uppercase; }
   .btn-ghost { background: rgba(255,255,255,0.08); color: var(--bg); border: none; border-radius: 6px; padding: 9px 12px; font-weight: 600; font-size: 13px; display: flex; align-items: center; gap: 6px; }
   .btn-primary { display: flex; align-items: center; gap: 6px; background: var(--amber); color: var(--ink); border: none; border-radius: 6px; padding: 10px 16px; font-weight: 600; font-size: 14px; }
@@ -156,6 +161,9 @@
   .batch-entry-row .batch-exp { flex: 1.3; }
   .batch-entry-row .batch-qty { flex: 1; }
   .batch-entry-remove { background: var(--surface); border: none; border-radius: 6px; width: 38px; height: 38px; flex-shrink: 0; display: flex; align-items: center; justify-content: center; color: var(--expired-band); }
+  .location-row { display: flex; align-items: center; justify-content: space-between; background: var(--surface); border: none; border-radius: 8px; padding: 11px 14px; font-size: 13.5px; font-weight: 600; color: var(--muted-2); text-align: left; width: 100%; }
+  .location-row.current { background: var(--ok-tint); color: var(--ok-text); }
+  .location-row .loc-addr { font-weight: 400; color: var(--muted); font-size: 11.5px; margin-top: 2px; }
   .batch-panel-title { font-size: 12.5px; font-weight: 700; color: #7A5310; margin-bottom: 6px; }
   .batch-match { display: flex; justify-content: space-between; align-items: center; background: #fff; border-radius: 6px; padding: 8px 10px; font-size: 12.5px; margin-bottom: 6px; }
   .batch-match:last-child { margin-bottom: 0; }
@@ -210,8 +218,8 @@
 <!-- ============ AUTH SCREEN ============ -->
 <div class="auth-wrap" id="authScreen">
   <div class="landing-intro">
-    <div class="brand-icon" style="width:44px; height:44px; margin: 0 auto 16px;">
-      <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+    <div class="brand-icon" style="width:56px; height:56px; margin: 0 auto 16px;">
+      <img src="/icon-512.png" alt="FloorStock">
     </div>
     <h1 class="landing-title">Stop losing money to expired stock.</h1>
     <p class="landing-sub">Scan it in, get an expiration alert before it's too late. FloorStock tracks what's on your shelves so nothing quietly goes to waste.</p>
@@ -226,9 +234,9 @@
   <div class="auth-card">
     <div class="auth-logo">
       <div class="auth-logo-icon">
-        <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+        <img src="/icon-192.png" alt="FloorStock">
       </div>
-      <div class="auth-logo-title">FLOORSTOCK</div>
+      <div class="auth-logo-title">Floor<span class="brand-wordmark-stock">Stock</span></div>
     </div>
 
     <div class="auth-tabs">
@@ -329,10 +337,10 @@
     <div class="header-inner">
       <div class="brand">
         <div class="brand-icon">
-          <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+          <img src="/apple-touch-icon.png" alt="FloorStock">
         </div>
         <div>
-          <div class="brand-title">FLOORSTOCK</div>
+          <div class="brand-title">Floor<span class="brand-wordmark-stock">Stock</span></div>
           <div class="brand-sub" id="storeSub">INVENTORY &amp; EXPIRATION TRACKING</div>
         </div>
       </div>
@@ -341,11 +349,15 @@
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
           Can&rsquo;t reach server
         </div>
-        <div class="store-pill" id="storePill"></div>
+        <button class="store-pill" id="storePill" style="border:none; cursor:pointer; display:flex; align-items:center; gap:5px;"></button>
         <div class="store-pill" id="trialPill" style="display:none; background:rgba(245,166,35,0.18); color:#F5A623;"></div>
         <button class="btn-ghost" id="adminDashboardBtn" style="display:none; background:rgba(245,166,35,0.14); color:var(--amber);">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
           Founder
+        </button>
+        <button class="btn-ghost" id="importBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
+          Import
         </button>
         <button class="btn-ghost" id="exportBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
@@ -559,6 +571,65 @@
         <div class="form-error" id="formError" style="display:none;"></div>
         <button type="submit" class="submit-btn" id="submitBtn">Add to floor</button>
       </form>
+    </div>
+  </div>
+
+  <!-- locations (multi-store) modal -->
+  <div class="modal-overlay" id="locationsOverlay">
+    <div class="modal" style="max-width:440px;">
+      <div class="modal-header">
+        <div class="modal-title">LOCATIONS</div>
+        <button class="modal-close" id="locationsCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <div id="locationsList" style="display:flex; flex-direction:column; gap:8px; margin-bottom:18px;"></div>
+
+        <div class="section-label" style="margin-top:0;">Add a location</div>
+        <div class="auth-error" id="addLocationError" style="display:none;"></div>
+        <form id="addLocationForm">
+          <div class="auth-field">
+            <label>Location name</label>
+            <input type="text" id="newLocationName" placeholder="e.g. Downtown Market">
+          </div>
+          <div class="auth-field">
+            <label>Address</label>
+            <input type="text" id="newLocationAddress" placeholder="e.g. 88 Main St, Springfield">
+          </div>
+          <button type="submit" class="submit-btn" id="addLocationSubmitBtn">Add location</button>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- bulk CSV import modal -->
+  <div class="modal-overlay" id="importOverlay">
+    <div class="modal" style="max-width:440px;">
+      <div class="modal-header">
+        <div class="modal-title">IMPORT INVENTORY</div>
+        <button class="modal-close" id="importCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <p style="font-size:13px; color:var(--muted-2); line-height:1.6; margin-top:0;">
+          Bring in your whole inventory at once from a spreadsheet, instead of scanning
+          everything by hand. New categories are created automatically from a Category
+          column, if you include one.
+        </p>
+        <button type="button" id="downloadTemplateBtn" style="background:var(--surface); border:none; border-radius:7px; padding:9px 14px; font-size:12.5px; font-weight:600; color:var(--accent); margin-bottom:16px; display:flex; align-items:center; gap:6px;">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+          Download CSV template
+        </button>
+        <div class="auth-field">
+          <label>CSV file</label>
+          <input type="file" id="importFileInput" accept=".csv,text/csv" class="field-input" style="padding:8px;">
+        </div>
+        <div class="auth-error" id="importError" style="display:none;"></div>
+        <div id="importResult" style="display:none; background:var(--ok-tint); color:var(--ok-text); border-radius:8px; padding:12px 14px; font-size:13px; margin-bottom:14px; line-height:1.5;"></div>
+        <button type="button" class="submit-btn" id="importSubmitBtn" disabled>Choose a file first</button>
+      </div>
     </div>
   </div>
 
@@ -966,8 +1037,7 @@
     document.getElementById('authScreen').style.display = 'none';
     document.getElementById('appShell').style.display = 'block';
     document.getElementById('storeSub').textContent = currentUser.store.name.toUpperCase();
-    document.getElementById('storePill').innerHTML =
-      `${esc(currentUser.store.name)} <span class="role-badge">${esc(currentUser.role)}</span>`;
+    renderStorePill();
     document.getElementById('workersBtn').style.display = currentUser.role === 'manager' ? 'flex' : 'none';
     applyPaywallState();
     handleCheckoutRedirect();
@@ -975,6 +1045,18 @@
     loadOnboardingState();
     init();
   }
+
+  function renderStorePill() {
+    const chevron = currentUser.role === 'manager'
+      ? '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>'
+      : '';
+    document.getElementById('storePill').innerHTML =
+      `${esc(currentUser.store.name)} <span class="role-badge">${esc(currentUser.role)}</span> ${chevron}`;
+  }
+
+  document.getElementById('storePill').addEventListener('click', () => {
+    if (currentUser.role === 'manager') openLocationsModal();
+  });
 
   async function checkAdminAccess() {
     if (currentUser.role !== 'manager') return;
@@ -1453,14 +1535,15 @@
 
   function formatBillingStatus(billing) {
     if (!billing.billingEnabled) return 'Billing isn\u2019t configured for this deployment \u2014 the app is unrestricted.';
+    const locNote = billing.storeCount > 1 ? ` Billed for ${billing.storeCount} locations.` : '';
     if (billing.status === 'trialing') {
-      return billing.trialDaysLeft > 0
+      return (billing.trialDaysLeft > 0
         ? `Free trial \u2014 ${billing.trialDaysLeft} day${billing.trialDaysLeft !== 1 ? 's' : ''} left.`
-        : 'Your free trial has ended.';
+        : 'Your free trial has ended.') + locNote;
     }
     if (billing.status === 'active') {
       const planLabel = billing.plan === 'annual' ? 'Annual' : billing.plan === 'monthly' ? 'Monthly' : null;
-      return planLabel ? `Subscription active \u2014 ${planLabel} plan.` : 'Subscription active.';
+      return (planLabel ? `Subscription active \u2014 ${planLabel} plan.` : 'Subscription active.') + locNote;
     }
     if (billing.status === 'past_due') return 'Payment failed \u2014 please update your card.';
     if (billing.status === 'canceled') return 'Subscription canceled.';
@@ -1560,6 +1643,188 @@
 
   document.getElementById('exportBtn').addEventListener('click', () => {
     window.location.href = '/api/items/export.csv';
+  });
+
+  // =====================================================================
+  // LOCATIONS (multi-store organizations)
+  // =====================================================================
+
+  async function openLocationsModal() {
+    document.getElementById('locationsOverlay').classList.add('open');
+    document.getElementById('addLocationError').style.display = 'none';
+    document.getElementById('newLocationName').value = '';
+    document.getElementById('newLocationAddress').value = '';
+    await loadLocationsList();
+  }
+  document.getElementById('locationsCloseBtn').addEventListener('click', () => {
+    document.getElementById('locationsOverlay').classList.remove('open');
+  });
+  document.getElementById('locationsOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'locationsOverlay') document.getElementById('locationsOverlay').classList.remove('open');
+  });
+
+  async function loadLocationsList() {
+    try {
+      const stores = await apiRequest('/api/stores');
+      const listEl = document.getElementById('locationsList');
+      listEl.innerHTML = stores.map(s => `
+        <button type="button" class="location-row ${s.isCurrent ? 'current' : ''}" data-store-id="${s.id}">
+          <span>
+            ${esc(s.name)}
+            <div class="loc-addr">${esc(s.address)}</div>
+          </span>
+          ${s.isCurrent ? '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>' : ''}
+        </button>
+      `).join('');
+      listEl.querySelectorAll('.location-row').forEach(btn => {
+        btn.addEventListener('click', () => switchLocation(btn.dataset.storeId));
+      });
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t load locations');
+    }
+  }
+
+  async function switchLocation(storeId) {
+    try {
+      const store = await apiRequest('/api/stores/switch', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ storeId }),
+      });
+      currentUser.store = store;
+      document.getElementById('storeSub').textContent = store.name.toUpperCase();
+      renderStorePill();
+      document.getElementById('locationsOverlay').classList.remove('open');
+      showToast(`Switched to ${store.name}`);
+      onboardingWorkerCount = null;
+      await loadStoreData();
+      loadOnboardingState();
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t switch locations');
+    }
+  }
+
+  document.getElementById('addLocationForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('addLocationError');
+    const name = document.getElementById('newLocationName').value.trim();
+    const address = document.getElementById('newLocationAddress').value.trim();
+    if (!name || !address) {
+      errEl.textContent = 'Enter a name and address for the new location.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const btn = document.getElementById('addLocationSubmitBtn');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Adding\u2026';
+    try {
+      await apiRequest('/api/stores', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, address }),
+      });
+      errEl.style.display = 'none';
+      document.getElementById('newLocationName').value = '';
+      document.getElementById('newLocationAddress').value = '';
+      showToast('Location added');
+      await loadLocationsList();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
+
+  // =====================================================================
+  // BULK CSV IMPORT
+  // =====================================================================
+
+  const IMPORT_TEMPLATE_CSV = 'Product Name,UPC,Category,Expiration Date,Quantity,Unit,Location,Size,Size Unit,Cost Price,Selling Price\r\n' +
+    'Organic Whole Milk 1gal,041220576428,Dairy,2026-09-15,12,each,Cooler 2,1,gal,2.50,4.99\r\n' +
+    'RedBull 12oz,611269003727,Drinks,2026-10-01,24,case,Cooler 5,12,oz,1.25,2.99\r\n';
+
+  document.getElementById('downloadTemplateBtn').addEventListener('click', () => {
+    const blob = new Blob([IMPORT_TEMPLATE_CSV], { type: 'text/csv' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'floorstock-import-template.csv';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  document.getElementById('importBtn').addEventListener('click', () => {
+    document.getElementById('importFileInput').value = '';
+    document.getElementById('importError').style.display = 'none';
+    document.getElementById('importResult').style.display = 'none';
+    document.getElementById('importSubmitBtn').disabled = true;
+    document.getElementById('importSubmitBtn').textContent = 'Choose a file first';
+    document.getElementById('importOverlay').classList.add('open');
+  });
+  document.getElementById('importCloseBtn').addEventListener('click', () => {
+    document.getElementById('importOverlay').classList.remove('open');
+  });
+  document.getElementById('importOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'importOverlay') document.getElementById('importOverlay').classList.remove('open');
+  });
+
+  document.getElementById('importFileInput').addEventListener('change', (e) => {
+    const file = e.target.files[0];
+    const btn = document.getElementById('importSubmitBtn');
+    if (file) {
+      btn.disabled = false;
+      btn.textContent = `Import ${file.name}`;
+    } else {
+      btn.disabled = true;
+      btn.textContent = 'Choose a file first';
+    }
+  });
+
+  document.getElementById('importSubmitBtn').addEventListener('click', () => {
+    const file = document.getElementById('importFileInput').files[0];
+    const errEl = document.getElementById('importError');
+    const resultEl = document.getElementById('importResult');
+    errEl.style.display = 'none';
+    resultEl.style.display = 'none';
+    if (!file) return;
+
+    const btn = document.getElementById('importSubmitBtn');
+    const originalText = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = 'Importing\u2026';
+
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const result = await apiRequest('/api/items/import.csv', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ csv: reader.result }),
+        });
+        let msg = `Imported ${result.imported} item${result.imported !== 1 ? 's' : ''}.`;
+        if (result.skipped > 0) msg += ` ${result.skipped} row${result.skipped !== 1 ? 's' : ''} skipped (missing or invalid data).`;
+        resultEl.textContent = msg;
+        resultEl.style.display = 'block';
+        if (result.imported > 0) {
+          showToast(`Imported ${result.imported} item${result.imported !== 1 ? 's' : ''}`);
+          await Promise.all([loadItems(), loadCategories()]);
+          renderAll();
+        }
+      } catch (err) {
+        errEl.textContent = err.message || 'Couldn\u2019t import that file.';
+        errEl.style.display = 'block';
+      } finally {
+        btn.disabled = false;
+        btn.textContent = originalText;
+      }
+    };
+    reader.onerror = () => {
+      errEl.textContent = 'Couldn\u2019t read that file.';
+      errEl.style.display = 'block';
+      btn.disabled = false;
+      btn.textContent = originalText;
+    };
+    reader.readAsText(file);
   });
 
   // =====================================================================
@@ -2428,9 +2693,13 @@
     renderAll();
   }
 
-  async function init() {
+  async function loadStoreData() {
     await Promise.all([loadItems(), loadCategories()]);
     renderAll();
+  }
+
+  async function init() {
+    await loadStoreData();
     setInterval(poll, POLL_INTERVAL_MS);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
   }

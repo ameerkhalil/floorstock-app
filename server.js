@@ -56,8 +56,21 @@ db.pragma('journal_mode = WAL');
 
 // ---------- schema ----------
 db.exec(`
+  CREATE TABLE IF NOT EXISTS organizations (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    trial_ends_at TEXT,
+    subscription_status TEXT NOT NULL DEFAULT 'trialing',
+    stripe_customer_id TEXT,
+    stripe_subscription_id TEXT,
+    subscription_plan TEXT,
+    digest_frequency TEXT NOT NULL DEFAULT 'daily'
+  );
+
   CREATE TABLE IF NOT EXISTS stores (
     id TEXT PRIMARY KEY,
+    organization_id TEXT,
     name TEXT NOT NULL,
     address TEXT NOT NULL,
     created_at TEXT NOT NULL,
@@ -70,7 +83,8 @@ db.exec(`
 
   CREATE TABLE IF NOT EXISTS users (
     id TEXT PRIMARY KEY,
-    store_id TEXT NOT NULL,
+    organization_id TEXT,
+    store_id TEXT,
     username TEXT NOT NULL UNIQUE,
     password_hash TEXT NOT NULL,
     role TEXT NOT NULL CHECK (role IN ('manager','worker')),
@@ -82,7 +96,8 @@ db.exec(`
   CREATE TABLE IF NOT EXISTS sessions (
     id TEXT PRIMARY KEY,
     user_id TEXT NOT NULL,
-    store_id TEXT NOT NULL,
+    organization_id TEXT,
+    store_id TEXT,
     role TEXT NOT NULL,
     created_at TEXT NOT NULL,
     expires_at TEXT NOT NULL
@@ -219,6 +234,41 @@ if (!digestLogCols.includes('emailed')) db.exec("ALTER TABLE digest_log ADD COLU
 // Stores that already existed before billing was added shouldn't suddenly get locked out.
 db.prepare("UPDATE stores SET subscription_status = 'active' WHERE subscription_status IS NULL OR subscription_status = ''").run();
 
+// Multi-location support: every store now belongs to an organization, and
+// billing lives on the organization, not the individual store. Backfill one
+// organization per pre-existing store, carrying its billing/trial state over
+// exactly as-is, so nobody's access or subscription changes because of this.
+if (!storeCols.includes('organization_id')) db.exec("ALTER TABLE stores ADD COLUMN organization_id TEXT");
+const userColsForOrg = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+if (!userColsForOrg.includes('organization_id')) db.exec("ALTER TABLE users ADD COLUMN organization_id TEXT");
+
+const storesNeedingOrg = db.prepare('SELECT * FROM stores WHERE organization_id IS NULL OR organization_id = ?').all('');
+const backfillOrgTxn = db.transaction(() => {
+  for (const store of storesNeedingOrg) {
+    const orgId = newId();
+    db.prepare(`
+      INSERT INTO organizations (id, name, created_at, trial_ends_at, subscription_status, stripe_customer_id, stripe_subscription_id, subscription_plan, digest_frequency)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      orgId, store.name, store.created_at, store.trial_ends_at, store.subscription_status,
+      store.stripe_customer_id, store.stripe_subscription_id, store.subscription_plan, store.digest_frequency || 'daily'
+    );
+    db.prepare('UPDATE stores SET organization_id = ? WHERE id = ?').run(orgId, store.id);
+    db.prepare('UPDATE users SET organization_id = ? WHERE store_id = ? AND (organization_id IS NULL OR organization_id = ?)')
+      .run(orgId, store.id, '');
+  }
+});
+if (storesNeedingOrg.length) {
+  backfillOrgTxn();
+  // Any session created before this migration has no organization_id and
+  // would otherwise hit confusing billing errors until the person logs back
+  // in anyway — clear them once, up front, so it's a clean re-login instead.
+  db.exec('DELETE FROM sessions');
+}
+
+const sessionCols = db.prepare("PRAGMA table_info(sessions)").all().map(c => c.name);
+if (!sessionCols.includes('organization_id')) db.exec("ALTER TABLE sessions ADD COLUMN organization_id TEXT");
+
 // ---------- Stripe webhook (needs the RAW body for signature verification,
 // so this is registered before express.json() touches the request) ----------
 app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req, res) => {
@@ -269,9 +319,9 @@ function createSession(user) {
   const id = crypto.randomBytes(32).toString('hex');
   const expiresAt = new Date(Date.now() + SESSION_TTL_MS).toISOString();
   db.prepare(`
-    INSERT INTO sessions (id, user_id, store_id, role, created_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?)
-  `).run(id, user.id, user.store_id, user.role, nowIso(), expiresAt);
+    INSERT INTO sessions (id, user_id, organization_id, store_id, role, created_at, expires_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `).run(id, user.id, user.organization_id, user.store_id, user.role, nowIso(), expiresAt);
   return { id, expiresAt };
 }
 
@@ -297,7 +347,7 @@ function authMiddleware(req, res, next) {
     req.auth = null;
     return next();
   }
-  req.auth = { userId: session.user_id, storeId: session.store_id, role: session.role };
+  req.auth = { userId: session.user_id, organizationId: session.organization_id, storeId: session.store_id, role: session.role, sessionId: session.id };
   next();
 }
 app.use(authMiddleware);
@@ -359,28 +409,34 @@ function logAudit(storeId, actorUsername, action, summary) {
 // BILLING helpers
 // =====================================================================
 
-function billingSnapshot(store) {
+function getStoreCount(organizationId) {
+  const row = db.prepare('SELECT COUNT(*) as c FROM stores WHERE organization_id = ?').get(organizationId);
+  return row ? row.c : 0;
+}
+
+function billingSnapshot(org, storeCount) {
   const now = Date.now();
-  const trialEndsAt = store.trial_ends_at;
-  const trialActive = store.subscription_status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > now;
-  const paidActive = store.subscription_status === 'active';
+  const trialEndsAt = org.trial_ends_at;
+  const trialActive = org.subscription_status === 'trialing' && trialEndsAt && new Date(trialEndsAt).getTime() > now;
+  const paidActive = org.subscription_status === 'active';
   const daysLeft = trialEndsAt ? Math.max(0, Math.ceil((new Date(trialEndsAt).getTime() - now) / 86400000)) : 0;
   return {
-    status: store.subscription_status,
+    status: org.subscription_status,
     trialEndsAt: trialEndsAt || null,
     trialDaysLeft: daysLeft,
     active: paidActive || trialActive,
     billingEnabled: !!stripe,
     plansAvailable: { monthly: !!STRIPE_PRICE_ID_MONTHLY, annual: !!STRIPE_PRICE_ID_ANNUAL },
-    plan: store.subscription_plan || null,
+    plan: org.subscription_plan || null,
+    storeCount: storeCount != null ? storeCount : getStoreCount(org.id),
   };
 }
 
 function requireActiveSubscription(req, res, next) {
   if (!stripe) return next(); // billing not configured on this deployment — never block
-  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
-  if (!store) return res.status(401).json({ error: 'Not signed in.' });
-  const snap = billingSnapshot(store);
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.auth.organizationId);
+  if (!org) return res.status(401).json({ error: 'Not signed in.' });
+  const snap = billingSnapshot(org);
   if (!snap.active) {
     return res.status(402).json({ error: 'Your free trial has ended. Ask your manager to subscribe to keep using FloorStock.', billing: snap });
   }
@@ -403,28 +459,33 @@ app.post('/api/auth/register-store', registerLimiter, (req, res) => {
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim().toLowerCase());
   if (existing) return res.status(409).json({ error: 'That username is already taken.' });
 
+  const orgId = newId();
   const storeId = newId();
   const userId = newId();
   const passwordHash = bcrypt.hashSync(password, 10);
   const ts = nowIso();
   const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
-  db.prepare('INSERT INTO stores (id, name, address, created_at, trial_ends_at, subscription_status) VALUES (?, ?, ?, ?, ?, ?)')
-    .run(storeId, storeName.trim(), storeAddress.trim(), ts, trialEndsAt, 'trialing');
   db.prepare(`
-    INSERT INTO users (id, store_id, username, password_hash, role, email, created_at)
-    VALUES (?, ?, ?, ?, 'manager', ?, ?)
-  `).run(userId, storeId, username.trim().toLowerCase(), passwordHash, email.trim().toLowerCase(), ts);
+    INSERT INTO organizations (id, name, created_at, trial_ends_at, subscription_status)
+    VALUES (?, ?, ?, ?, 'trialing')
+  `).run(orgId, storeName.trim(), ts, trialEndsAt);
+  db.prepare('INSERT INTO stores (id, organization_id, name, address, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(storeId, orgId, storeName.trim(), storeAddress.trim(), ts);
+  db.prepare(`
+    INSERT INTO users (id, organization_id, store_id, username, password_hash, role, email, created_at)
+    VALUES (?, ?, ?, ?, ?, 'manager', ?, ?)
+  `).run(userId, orgId, storeId, username.trim().toLowerCase(), passwordHash, email.trim().toLowerCase(), ts);
 
   logAudit(storeId, username.trim().toLowerCase(), 'store_created', `Store "${storeName.trim()}" created`);
 
-  const session = createSession({ id: userId, store_id: storeId, role: 'manager' });
+  const session = createSession({ id: userId, organization_id: orgId, store_id: storeId, role: 'manager' });
   setSessionCookie(res, session.id, session.expiresAt);
-  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(storeId);
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(orgId);
   res.status(201).json({
     role: 'manager', username: username.trim().toLowerCase(),
     store: { id: storeId, name: storeName.trim(), address: storeAddress.trim() },
-    billing: billingSnapshot(store),
+    billing: billingSnapshot(org, 1),
   });
 });
 
@@ -438,10 +499,18 @@ app.post('/api/auth/login', loginLimiter, (req, res) => {
     return res.status(401).json({ error: 'Incorrect username or password.' });
   }
 
-  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(user.store_id);
-  const session = createSession(user);
+  // Managers can have multiple stores; fall back to any store in their org if
+  // their last-active one was somehow removed. Workers always have exactly one.
+  let store = user.store_id ? db.prepare('SELECT * FROM stores WHERE id = ?').get(user.store_id) : null;
+  if (!store || store.organization_id !== user.organization_id) {
+    store = db.prepare('SELECT * FROM stores WHERE organization_id = ? ORDER BY created_at ASC LIMIT 1').get(user.organization_id);
+  }
+  if (!store) return res.status(500).json({ error: 'No store found for this account.' });
+
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(user.organization_id);
+  const session = createSession({ id: user.id, organization_id: user.organization_id, store_id: store.id, role: user.role });
   setSessionCookie(res, session.id, session.expiresAt);
-  res.json({ role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address }, billing: billingSnapshot(store) });
+  res.json({ role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address }, billing: billingSnapshot(org) });
 });
 
 app.post('/api/auth/logout', (req, res) => {
@@ -455,8 +524,60 @@ app.get('/api/auth/me', (req, res) => {
   if (!req.auth) return res.json({ signedIn: false });
   const user = db.prepare('SELECT * FROM users WHERE id = ?').get(req.auth.userId);
   const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
-  if (!user || !store) return res.json({ signedIn: false });
-  res.json({ signedIn: true, role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address }, billing: billingSnapshot(store) });
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.auth.organizationId);
+  if (!user || !store || !org) return res.json({ signedIn: false });
+  res.json({ signedIn: true, role: user.role, username: user.username, store: { id: store.id, name: store.name, address: store.address }, billing: billingSnapshot(org) });
+});
+
+// List every store (location) in the signed-in manager's organization, and
+// switch which one the current session is actively viewing/editing.
+app.get('/api/stores', requireManager, (req, res) => {
+  const stores = db.prepare('SELECT * FROM stores WHERE organization_id = ? ORDER BY created_at ASC').all(req.auth.organizationId);
+  res.json(stores.map(s => ({ id: s.id, name: s.name, address: s.address, isCurrent: s.id === req.auth.storeId })));
+});
+
+app.post('/api/stores', requireManager, async (req, res) => {
+  const { name, address } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'Location name is required.' });
+  if (!address || !String(address).trim()) return res.status(400).json({ error: 'Location address is required.' });
+
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.auth.organizationId);
+  const snap = billingSnapshot(org);
+  if (org.subscription_status !== 'active' && !(org.subscription_status === 'trialing' && snap.active)) {
+    return res.status(402).json({ error: 'Subscribe to add more than one location.', billing: snap });
+  }
+
+  const storeId = newId();
+  db.prepare('INSERT INTO stores (id, organization_id, name, address, created_at) VALUES (?, ?, ?, ?, ?)')
+    .run(storeId, req.auth.organizationId, name.trim(), address.trim(), nowIso());
+  logAudit(storeId, currentUsername(req), 'store_created', `Location "${name.trim()}" added`);
+
+  // If already on a paid subscription, keep Stripe's quantity in sync so
+  // billing reflects the new location automatically.
+  if (stripe && org.subscription_status === 'active' && org.stripe_subscription_id) {
+    try {
+      const sub = await stripe.subscriptions.retrieve(org.stripe_subscription_id);
+      const item = sub.items.data[0];
+      if (item) {
+        await stripe.subscriptionItems.update(item.id, { quantity: getStoreCount(req.auth.organizationId), proration_behavior: 'create_prorations' });
+      }
+    } catch (e) {
+      // Store is still created either way — billing sync failure shouldn't block adding a location.
+    }
+  }
+
+  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(storeId);
+  res.status(201).json({ id: store.id, name: store.name, address: store.address, isCurrent: false });
+});
+
+app.post('/api/stores/switch', requireManager, (req, res) => {
+  const { storeId } = req.body || {};
+  const store = db.prepare('SELECT * FROM stores WHERE id = ? AND organization_id = ?').get(storeId, req.auth.organizationId);
+  if (!store) return res.status(404).json({ error: 'Location not found.' });
+
+  db.prepare('UPDATE sessions SET store_id = ? WHERE id = ?').run(store.id, req.auth.sessionId);
+  db.prepare('UPDATE users SET store_id = ? WHERE id = ?').run(store.id, req.auth.userId); // remember for next login too
+  res.json({ id: store.id, name: store.name, address: store.address });
 });
 
 // Managers reset their own password via an emailed link (workers ask their
@@ -527,11 +648,11 @@ app.post('/api/workers', requireManager, (req, res) => {
   const id = newId();
   const uname = username.trim().toLowerCase();
   db.prepare(`
-    INSERT INTO users (id, store_id, username, password_hash, role, created_at)
-    VALUES (?, ?, ?, ?, 'worker', ?)
-  `).run(id, req.auth.storeId, uname, bcrypt.hashSync(password, 10), nowIso());
+    INSERT INTO users (id, organization_id, store_id, username, password_hash, role, created_at)
+    VALUES (?, ?, ?, ?, ?, 'worker', ?)
+  `).run(id, req.auth.organizationId, req.auth.storeId, uname, bcrypt.hashSync(password, 10), nowIso());
 
-  logAudit(req.auth.storeId, currentUsername(req), 'worker_added', `Added worker login "${uname}"`);
+  logAudit(req.auth.storeId, currentUsername(req), 'worker_added', `Added worker login "${uname}" for this location`);
   res.status(201).json({ id, username: uname });
 });
 
@@ -619,8 +740,8 @@ app.get('/api/audit', requireManager, (req, res) => {
 // =====================================================================
 
 app.get('/api/billing/status', requireAuth, (req, res) => {
-  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
-  res.json(billingSnapshot(store));
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.auth.organizationId);
+  res.json(billingSnapshot(org));
 });
 
 function appBaseUrl(req) {
@@ -632,18 +753,19 @@ app.post('/api/billing/create-checkout-session', requireManager, async (req, res
   const priceId = plan === 'annual' ? STRIPE_PRICE_ID_ANNUAL : STRIPE_PRICE_ID_MONTHLY;
 
   if (!stripe || !priceId) return res.status(400).json({ error: `The ${plan} plan isn\u2019t configured on the server yet.` });
-  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.auth.organizationId);
   const manager = db.prepare('SELECT * FROM users WHERE id = ?').get(req.auth.userId);
+  const quantity = Math.max(1, getStoreCount(req.auth.organizationId));
 
   try {
     const session = await stripe.checkout.sessions.create({
       mode: 'subscription',
-      line_items: [{ price: priceId, quantity: 1 }],
-      customer: store.stripe_customer_id || undefined,
-      customer_email: store.stripe_customer_id ? undefined : manager.email,
-      client_reference_id: store.id,
-      metadata: { storeId: store.id, plan },
-      subscription_data: { metadata: { storeId: store.id, plan } },
+      line_items: [{ price: priceId, quantity }],
+      customer: org.stripe_customer_id || undefined,
+      customer_email: org.stripe_customer_id ? undefined : manager.email,
+      client_reference_id: org.id,
+      metadata: { organizationId: org.id, plan },
+      subscription_data: { metadata: { organizationId: org.id, plan } },
       success_url: `${appBaseUrl(req)}/?checkout=success&session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${appBaseUrl(req)}/?checkout=cancelled`,
     });
@@ -655,12 +777,12 @@ app.post('/api/billing/create-checkout-session', requireManager, async (req, res
 
 app.post('/api/billing/create-portal-session', requireManager, async (req, res) => {
   if (!stripe) return res.status(400).json({ error: 'Billing isn\u2019t configured on the server yet.' });
-  const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
-  if (!store.stripe_customer_id) return res.status(400).json({ error: 'No billing account on file yet \u2014 subscribe first.' });
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.auth.organizationId);
+  if (!org.stripe_customer_id) return res.status(400).json({ error: 'No billing account on file yet \u2014 subscribe first.' });
 
   try {
     const session = await stripe.billingPortal.sessions.create({
-      customer: store.stripe_customer_id,
+      customer: org.stripe_customer_id,
       return_url: `${appBaseUrl(req)}/`,
     });
     res.json({ url: session.url });
@@ -678,14 +800,14 @@ app.get('/api/billing/confirm-checkout', requireManager, async (req, res) => {
 
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId, { expand: ['subscription'] });
-    if (session.client_reference_id !== req.auth.storeId) {
-      return res.status(403).json({ error: 'This checkout session doesn\u2019t belong to your store.' });
+    if (session.client_reference_id !== req.auth.organizationId) {
+      return res.status(403).json({ error: 'This checkout session doesn\u2019t belong to your organization.' });
     }
     if (session.payment_status === 'paid' || (session.subscription && session.subscription.status === 'active')) {
-      applySubscriptionToStore(req.auth.storeId, session.customer, session.subscription, session.metadata && session.metadata.plan);
+      applySubscriptionToOrg(req.auth.organizationId, session.customer, session.subscription, session.metadata && session.metadata.plan);
     }
-    const store = db.prepare('SELECT * FROM stores WHERE id = ?').get(req.auth.storeId);
-    res.json(billingSnapshot(store));
+    const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.auth.organizationId);
+    res.json(billingSnapshot(org));
   } catch (e) {
     res.status(502).json({ error: `Couldn\u2019t confirm checkout: ${e.message}` });
   }
@@ -718,36 +840,42 @@ async function getPriceAmounts() {
 }
 
 app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
-  const stores = db.prepare('SELECT * FROM stores').all();
+  const orgs = db.prepare('SELECT * FROM organizations').all();
+  const allStores = db.prepare('SELECT * FROM stores').all();
+  const storeCountByOrg = new Map();
+  for (const s of allStores) storeCountByOrg.set(s.organization_id, (storeCountByOrg.get(s.organization_id) || 0) + 1);
   const now = Date.now();
 
-  const totalStores = stores.length;
-  const trialing = stores.filter(s => s.subscription_status === 'trialing');
-  const active = stores.filter(s => s.subscription_status === 'active');
-  const canceled = stores.filter(s => s.subscription_status === 'canceled');
-  const pastDue = stores.filter(s => s.subscription_status === 'past_due');
-  const activeMonthly = active.filter(s => s.subscription_plan === 'monthly').length;
-  const activeAnnual = active.filter(s => s.subscription_plan === 'annual').length;
-  const activeUnknownPlan = active.length - activeMonthly - activeAnnual;
+  const totalStores = allStores.length;
+  const totalOrgs = orgs.length;
+  const trialing = orgs.filter(o => o.subscription_status === 'trialing');
+  const active = orgs.filter(o => o.subscription_status === 'active');
+  const canceled = orgs.filter(o => o.subscription_status === 'canceled');
+  const pastDue = orgs.filter(o => o.subscription_status === 'past_due');
+  const activeMonthly = active.filter(o => o.subscription_plan === 'monthly');
+  const activeAnnual = active.filter(o => o.subscription_plan === 'annual');
+  const activeUnknownPlan = active.length - activeMonthly.length - activeAnnual.length;
 
   const prices = await getPriceAmounts();
-  const mrr = (activeMonthly * (prices.monthly || 0)) + (activeAnnual * ((prices.annual || 0) / 12));
+  const sumStores = (list) => list.reduce((sum, o) => sum + (storeCountByOrg.get(o.id) || 1), 0);
+  const mrr = (sumStores(activeMonthly) * (prices.monthly || 0)) + (sumStores(activeAnnual) * ((prices.annual || 0) / 12));
 
   const trialEndingSoon = trialing
-    .filter(s => s.trial_ends_at && (new Date(s.trial_ends_at).getTime() - now) <= 3 * 24 * 60 * 60 * 1000)
-    .map(s => ({ id: s.id, name: s.name, trialEndsAt: s.trial_ends_at }))
+    .filter(o => o.trial_ends_at && (new Date(o.trial_ends_at).getTime() - now) <= 3 * 24 * 60 * 60 * 1000)
+    .map(o => ({ id: o.id, name: o.name, trialEndsAt: o.trial_ends_at }))
     .sort((a, b) => new Date(a.trialEndsAt) - new Date(b.trialEndsAt));
 
-  const recentSignups = [...stores]
+  const recentSignups = [...orgs]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
     .slice(0, 10)
-    .map(s => ({ id: s.id, name: s.name, createdAt: s.created_at, status: s.subscription_status }));
+    .map(o => ({ id: o.id, name: o.name, createdAt: o.created_at, status: o.subscription_status, storeCount: storeCountByOrg.get(o.id) || 1 }));
 
   res.json({
     totalStores,
+    totalOrganizations: totalOrgs,
     trialingCount: trialing.length,
     activeCount: active.length,
-    activeMonthly, activeAnnual, activeUnknownPlan,
+    activeMonthly: activeMonthly.length, activeAnnual: activeAnnual.length, activeUnknownPlan,
     canceledCount: canceled.length,
     pastDueCount: pastDue.length,
     mrr: Math.round(mrr * 100) / 100,
@@ -757,41 +885,41 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
   });
 });
 
-function applySubscriptionToStore(storeId, stripeCustomerId, subscription, plan) {
+function applySubscriptionToOrg(organizationId, stripeCustomerId, subscription, plan) {
   const status = typeof subscription === 'string' ? 'active' : (subscription && subscription.status) || 'active';
   const subscriptionId = typeof subscription === 'string' ? subscription : subscription && subscription.id;
   const inferredPlan = plan || (subscription && subscription.metadata && subscription.metadata.plan) || null;
   db.prepare(`
-    UPDATE stores SET stripe_customer_id = ?, stripe_subscription_id = ?, subscription_status = ?, subscription_plan = COALESCE(?, subscription_plan)
+    UPDATE organizations SET stripe_customer_id = ?, stripe_subscription_id = ?, subscription_status = ?, subscription_plan = COALESCE(?, subscription_plan)
     WHERE id = ?
-  `).run(stripeCustomerId || null, subscriptionId || null, status === 'active' || status === 'trialing' ? 'active' : status, inferredPlan, storeId);
+  `).run(stripeCustomerId || null, subscriptionId || null, status === 'active' || status === 'trialing' ? 'active' : status, inferredPlan, organizationId);
 }
 
 function handleStripeEvent(event) {
   switch (event.type) {
     case 'checkout.session.completed': {
       const session = event.data.object;
-      const storeId = session.client_reference_id || (session.metadata && session.metadata.storeId);
+      const organizationId = session.client_reference_id || (session.metadata && session.metadata.organizationId);
       const plan = session.metadata && session.metadata.plan;
-      if (storeId) applySubscriptionToStore(storeId, session.customer, session.subscription, plan);
+      if (organizationId) applySubscriptionToOrg(organizationId, session.customer, session.subscription, plan);
       break;
     }
     case 'customer.subscription.updated':
     case 'customer.subscription.created': {
       const sub = event.data.object;
-      const storeId = sub.metadata && sub.metadata.storeId;
+      const organizationId = sub.metadata && sub.metadata.organizationId;
       const plan = sub.metadata && sub.metadata.plan;
-      if (storeId) {
-        db.prepare('UPDATE stores SET subscription_status = ?, stripe_subscription_id = ?, subscription_plan = COALESCE(?, subscription_plan) WHERE id = ?')
-          .run(sub.status, sub.id, plan || null, storeId);
+      if (organizationId) {
+        db.prepare('UPDATE organizations SET subscription_status = ?, stripe_subscription_id = ?, subscription_plan = COALESCE(?, subscription_plan) WHERE id = ?')
+          .run(sub.status, sub.id, plan || null, organizationId);
       }
       break;
     }
     case 'customer.subscription.deleted': {
       const sub = event.data.object;
-      const storeId = sub.metadata && sub.metadata.storeId;
-      if (storeId) {
-        db.prepare("UPDATE stores SET subscription_status = 'canceled' WHERE id = ?").run(storeId);
+      const organizationId = sub.metadata && sub.metadata.organizationId;
+      if (organizationId) {
+        db.prepare("UPDATE organizations SET subscription_status = 'canceled' WHERE id = ?").run(organizationId);
       }
       break;
     }
@@ -1503,7 +1631,7 @@ function runDigestCheckIfDue() {
       continue;
     }
 
-    const manager = db.prepare("SELECT * FROM users WHERE store_id = ? AND role = 'manager' LIMIT 1").get(store.id);
+    const manager = db.prepare("SELECT * FROM users WHERE organization_id = ? AND role = 'manager' LIMIT 1").get(store.organization_id);
     const alertItems = getAlertItemsForStore(store.id);
     const willSend = !!(manager && manager.email && alertItems.length > 0);
     db.prepare('INSERT OR IGNORE INTO digest_log (store_id, sent_date, created_at, emailed) VALUES (?, ?, ?, ?)').run(store.id, today, nowIso(), willSend ? 1 : 0);
@@ -1558,7 +1686,7 @@ function runBackupCheckIfDue() {
     const daysSince = (!row || !row.d) ? Infinity : (Date.now() - new Date(row.d + 'T00:00:00Z').getTime()) / 86400000;
     if (daysSince < 7) continue; // weekly cadence, fixed
 
-    const manager = db.prepare("SELECT * FROM users WHERE store_id = ? AND role = 'manager' LIMIT 1").get(store.id);
+    const manager = db.prepare("SELECT * FROM users WHERE organization_id = ? AND role = 'manager' LIMIT 1").get(store.organization_id);
     db.prepare('INSERT OR IGNORE INTO backup_log (store_id, sent_date, created_at) VALUES (?, ?, ?)').run(store.id, today, nowIso());
     if (manager && manager.email) sendBackupEmail(store, manager.email).catch(() => {});
   }

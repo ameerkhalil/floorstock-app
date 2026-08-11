@@ -72,6 +72,19 @@ database, and a browser frontend.
 - **Getting-started checklist** — new managers see a small dismissible checklist ("Add
   your first item," "Invite a worker") until they've done both, then it disappears on
   its own.
+- **Bulk CSV import** — the "Import" button lets a new store bring in an existing
+  inventory from a spreadsheet in one shot, instead of scanning everything by hand.
+  Includes a downloadable template; unrecognized or invalid rows are skipped and
+  reported rather than failing the whole import; new categories are created
+  automatically from a Category column if you include one.
+- **Rebrand** — new logo and app icon (the shelf/growth mark), a two-tone gradient
+  wordmark, and a refreshed accent color throughout the app.
+- **Multi-location support** — a manager account belongs to an organization, which can
+  own multiple stores (locations). Click the store name in the header to switch between
+  locations or add a new one. Billing is now per-organization: one subscription, with
+  Stripe's quantity automatically matching the number of locations, so adding a 4th
+  store bumps the subscription instead of needing a separate signup. Workers are still
+  scoped to exactly one location, same as before.
 
 ### Important: existing data isn't tied to a store
 
@@ -89,6 +102,30 @@ with any store and won't show up. Sign up as a manager and re-add them.
 3. MRR is calculated using the live price amounts pulled from your `STRIPE_PRICE_ID_MONTHLY`
    and `STRIPE_PRICE_ID_ANNUAL` prices in Stripe, so it stays accurate automatically if
    you ever change your pricing — no need to update a number by hand anywhere.
+
+### How organizations and locations fit together
+
+- An **organization** is the billing entity — one Stripe subscription, one trial clock.
+- A **store** is a physical location, with its own inventory, categories, and activity
+  log. An organization can own any number of stores.
+- A **manager** account belongs to an organization and can access every store in it,
+  switching between them from the header. Manager logins are created once, at signup.
+- A **worker** account belongs to exactly one store, same as before — they never see
+  other locations, even within the same organization.
+- Adding a 2nd+ location requires an active subscription (trial covers your first store
+  freely, same as always). If you're already on a paid plan, adding a location updates
+  your Stripe subscription's quantity automatically — no separate checkout needed.
+
+### If you're upgrading from a single-store version of this app
+
+The first deploy after this update runs a one-time migration: it creates one
+organization per existing store, carrying over that store's exact trial/subscription
+state, so nobody's billing or access changes because of it. It also clears all existing
+sessions as part of that migration, so **everyone will need to log back in once** after
+this deploys — that's expected, not a bug. The migration only adds new tables and
+columns; it never drops or renames anything on the existing `stores` or `users` tables,
+so if you ever need to roll back the *code* to a previous version, that's safe to do —
+the old code simply won't look at the new `organizations` table.
 
 ### On real sales data and POS integration
 
@@ -265,6 +302,9 @@ on login/registration and required on the routes marked "auth".
 | GET    | `/api/auth/me`                | —        | Current session info, if any               |
 | POST   | `/api/auth/forgot-password`   | —        | Email a manager a password reset link      |
 | POST   | `/api/auth/reset-password`    | —        | Set a new password using a reset token     |
+| GET    | `/api/stores`                 | manager  | List every location in your organization   |
+| POST   | `/api/stores`                 | manager  | Add a new location; body `{ name, address }` |
+| POST   | `/api/stores/switch`          | manager  | Switch the session's active location; body `{ storeId }` |
 | GET    | `/api/workers`                | manager  | List worker logins for your store          |
 | POST   | `/api/workers`                | manager  | Create a worker login                      |
 | PUT    | `/api/workers/:id/password`   | manager  | Reset a worker's password                  |
@@ -289,6 +329,7 @@ on login/registration and required on the routes marked "auth".
 | GET    | `/api/items`                  | any      | List your store's items                    |
 | GET    | `/api/items/by-upc/:upc`      | any      | Find existing batches with this UPC        |
 | GET    | `/api/items/export.csv`       | any      | Download the store's inventory as CSV      |
+| POST   | `/api/items/import.csv`       | any      | Bulk import; body `{ csv: "..." }` (raw CSV text) |
 | POST   | `/api/items`                  | any      | Create an item                             |
 | POST   | `/api/items/:id/add-quantity` | any      | Add units to an existing batch             |
 | POST   | `/api/items/:id/sell`         | any      | Log a partial sale; body `{ quantity }`    |
