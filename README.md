@@ -66,11 +66,29 @@ database, and a browser frontend.
   does and its key features, for first-time visitors, not just a bare login form.
 - **Basic rate limiting** — login, signup, and password-reset endpoints are throttled
   per IP to make brute-force guessing impractical.
+- **Founder dashboard** — a cross-store view (total stores, active trials, paid
+  subscribers, MRR pulled live from Stripe, trials ending soon, recent signups) visible
+  only to you, gated by the `ADMIN_EMAIL` environment variable — see below.
+- **Getting-started checklist** — new managers see a small dismissible checklist ("Add
+  your first item," "Invite a worker") until they've done both, then it disappears on
+  its own.
 
 ### Important: existing data isn't tied to a store
 
 If you had test items in the app before store accounts existed, they aren't associated
 with any store and won't show up. Sign up as a manager and re-add them.
+
+### Setting up the founder dashboard (optional, no cost)
+
+1. In Render, add environment variable **Key** `ADMIN_EMAIL`, **Value** the exact email
+   address on your own manager account (case-insensitive, but must match exactly
+   otherwise).
+2. Redeploy, then sign in with that manager account — a "Founder" button appears in the
+   header, visible only to you. No other manager account will ever see it, regardless of
+   what they try.
+3. MRR is calculated using the live price amounts pulled from your `STRIPE_PRICE_ID_MONTHLY`
+   and `STRIPE_PRICE_ID_ANNUAL` prices in Stripe, so it stays accurate automatically if
+   you ever change your pricing — no need to update a number by hand anywhere.
 
 ### On real sales data and POS integration
 
@@ -265,6 +283,7 @@ on login/registration and required on the routes marked "auth".
 | POST   | `/api/billing/create-checkout-session` | manager | Start a Stripe Checkout session; body `{ plan: "monthly" \| "annual" }` |
 | POST   | `/api/billing/create-portal-session`   | manager | Open Stripe's billing portal (update card, cancel) |
 | GET    | `/api/billing/confirm-checkout` | manager | Confirm a just-completed checkout immediately |
+| GET    | `/api/admin/dashboard`        | you only | Cross-store stats; gated by `ADMIN_EMAIL`, 403 for everyone else |
 | POST   | `/api/webhooks/stripe`        | —        | Stripe calls this; not for direct use      |
 | GET    | `/api/upc-lookup/:upc`        | any      | Look up a product name by UPC              |
 | GET    | `/api/items`                  | any      | List your store's items                    |

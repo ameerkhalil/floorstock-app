@@ -195,6 +195,11 @@
   .dash-stat-label { font-size: 12px; color: var(--muted); margin-top: 6px; font-weight: 600; letter-spacing: 0.2px; }
   .dash-categories { display: flex; flex-wrap: wrap; gap: 8px; }
   .dash-section-title { font-family: 'Oswald', sans-serif; font-size: 13px; font-weight: 600; letter-spacing: 0.6px; text-transform: uppercase; color: var(--muted-2); margin-bottom: 10px; }
+  .onboarding-step { display: flex; align-items: center; gap: 10px; font-size: 13.5px; color: var(--muted-2); font-weight: 500; }
+  .onboarding-step.done { color: var(--ok-text); }
+  .onboarding-check { width: 20px; height: 20px; border-radius: 50%; border: 2px solid var(--border); flex-shrink: 0; display: flex; align-items: center; justify-content: center; }
+  .onboarding-step.done .onboarding-check { border-color: var(--ok-band); background: var(--ok-band); }
+  .onboarding-step.done .onboarding-check::after { content: ''; width: 5px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(45deg) translate(-1px, -1px); }
 
   .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 7px; font-size: 13.5px; font-weight: 500; box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 300; display: none; align-items: center; gap: 6px; max-width: 90vw; text-align: center; }
   .toast.show { display: flex; }
@@ -338,6 +343,10 @@
         </div>
         <div class="store-pill" id="storePill"></div>
         <div class="store-pill" id="trialPill" style="display:none; background:rgba(245,166,35,0.18); color:#F5A623;"></div>
+        <button class="btn-ghost" id="adminDashboardBtn" style="display:none; background:rgba(245,166,35,0.14); color:var(--amber);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="m19 9-5 5-4-4-3 3"/></svg>
+          Founder
+        </button>
         <button class="btn-ghost" id="exportBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Export
@@ -380,6 +389,23 @@
     </div>
 
     <div id="mainContent">
+      <div id="onboardingChecklist" style="display:none; background:#fff; border:1px solid var(--border-light); border-radius:12px; padding:18px 20px; margin-bottom:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:12px;">
+          <div style="font-family:'Oswald', sans-serif; font-size:14px; font-weight:600; letter-spacing:0.4px;">GETTING STARTED</div>
+          <button type="button" id="dismissOnboardingBtn" style="background:none; border:none; color:var(--muted); font-size:12px; font-weight:600;">Dismiss</button>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:10px;">
+          <div class="onboarding-step" id="onboardingStepItem">
+            <span class="onboarding-check"></span>
+            <span>Add your first item</span>
+          </div>
+          <div class="onboarding-step" id="onboardingStepWorker">
+            <span class="onboarding-check"></span>
+            <span>Invite a worker from Manage \u2192 Workers</span>
+          </div>
+        </div>
+      </div>
+
       <div class="dash-wrap" id="dashWrap">
         <div class="dash-stats" id="dashStats"></div>
         <div id="dashCategoriesSection" style="display:none;">
@@ -533,6 +559,28 @@
         <div class="form-error" id="formError" style="display:none;"></div>
         <button type="submit" class="submit-btn" id="submitBtn">Add to floor</button>
       </form>
+    </div>
+  </div>
+
+  <!-- founder dashboard modal -->
+  <div class="modal-overlay" id="adminDashboardOverlay">
+    <div class="modal" style="max-width:600px;">
+      <div class="modal-header">
+        <div class="modal-title">FOUNDER DASHBOARD</div>
+        <button class="modal-close" id="adminDashboardCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px; max-height: 75vh; overflow-y: auto;">
+        <div id="adminStats" style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:20px;"></div>
+
+        <div class="section-label" style="margin-top:0;">Trials ending in the next 3 days</div>
+        <div id="adminTrialEnding"></div>
+        <div id="adminTrialEndingEmpty" style="font-size:13px;color:var(--muted);display:none;">None right now.</div>
+
+        <div class="section-label">Recent signups</div>
+        <div id="adminRecentSignups"></div>
+      </div>
     </div>
   </div>
 
@@ -923,7 +971,72 @@
     document.getElementById('workersBtn').style.display = currentUser.role === 'manager' ? 'flex' : 'none';
     applyPaywallState();
     handleCheckoutRedirect();
+    checkAdminAccess();
+    loadOnboardingState();
     init();
+  }
+
+  async function checkAdminAccess() {
+    if (currentUser.role !== 'manager') return;
+    try {
+      await apiRequest('/api/admin/dashboard');
+      document.getElementById('adminDashboardBtn').style.display = 'flex';
+    } catch (e) {
+      // not the founder account — silently keep the button hidden, no error shown
+    }
+  }
+
+  document.getElementById('adminDashboardBtn').addEventListener('click', openAdminDashboard);
+  document.getElementById('adminDashboardCloseBtn').addEventListener('click', () => {
+    document.getElementById('adminDashboardOverlay').classList.remove('open');
+  });
+  document.getElementById('adminDashboardOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'adminDashboardOverlay') document.getElementById('adminDashboardOverlay').classList.remove('open');
+  });
+
+  async function openAdminDashboard() {
+    document.getElementById('adminDashboardOverlay').classList.add('open');
+    try {
+      const d = await apiRequest('/api/admin/dashboard');
+      const tiles = [
+        { label: 'Total stores', value: d.totalStores, color: 'var(--accent)' },
+        { label: 'Active trials', value: d.trialingCount, color: 'var(--soon-band)' },
+        { label: 'Paid subscribers', value: d.activeCount, color: 'var(--ok-band)' },
+        { label: 'MRR' + (d.mrrEstimated ? ' (est.)' : ''), value: `$${d.mrr.toFixed(2)}`, color: 'var(--ok-band)' },
+        { label: 'Monthly / Annual', value: `${d.activeMonthly} / ${d.activeAnnual}`, color: 'var(--muted-2)' },
+        { label: 'Canceled', value: d.canceledCount, color: 'var(--expired-band)' },
+      ];
+      document.getElementById('adminStats').innerHTML = tiles.map(t => `
+        <div class="dash-stat">
+          <div class="dash-stat-value" style="font-size:22px; color:${t.color};">${t.value}</div>
+          <div class="dash-stat-label">${esc(t.label)}</div>
+        </div>
+      `).join('');
+
+      const endingEl = document.getElementById('adminTrialEnding');
+      const endingEmptyEl = document.getElementById('adminTrialEndingEmpty');
+      if (d.trialEndingSoon.length === 0) {
+        endingEl.innerHTML = '';
+        endingEmptyEl.style.display = 'block';
+      } else {
+        endingEmptyEl.style.display = 'none';
+        endingEl.innerHTML = d.trialEndingSoon.map(s => `
+          <div class="audit-row">
+            <span style="font-weight:600;">${esc(s.name)}</span>
+            <span style="color:var(--muted); float:right;">${new Date(s.trialEndsAt).toLocaleDateString()}</span>
+          </div>
+        `).join('');
+      }
+
+      document.getElementById('adminRecentSignups').innerHTML = d.recentSignups.map(s => `
+        <div class="audit-row">
+          <span style="font-weight:600;">${esc(s.name)}</span>
+          <span style="color:var(--muted); float:right;">${esc(s.status)} \u00b7 ${new Date(s.createdAt).toLocaleDateString()}</span>
+        </div>
+      `).join('');
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t load the dashboard');
+    }
   }
 
   async function handleCheckoutRedirect() {
@@ -1090,6 +1203,8 @@
       document.getElementById('newWorkerPassword').value = '';
       showToast('Worker added');
       await loadWorkers();
+      onboardingWorkerCount = (onboardingWorkerCount || 0) + 1;
+      renderOnboardingChecklist();
     } catch (err) {
       errEl.textContent = err.message;
       errEl.style.display = 'block';
@@ -1795,7 +1910,43 @@
     renderAlerts();
     renderGrid();
     renderDashboard();
+    renderOnboardingChecklist();
   }
+
+  // ---------- onboarding checklist ----------
+  let onboardingWorkerCount = null;
+
+  async function loadOnboardingState() {
+    if (currentUser.role !== 'manager') return;
+    try {
+      const workers = await apiRequest('/api/workers');
+      onboardingWorkerCount = workers.length;
+      renderOnboardingChecklist();
+    } catch (e) {
+      // non-fatal — checklist just won't show the worker step as complete
+    }
+  }
+
+  function renderOnboardingChecklist() {
+    const card = document.getElementById('onboardingChecklist');
+    if (currentUser.role !== 'manager') { card.style.display = 'none'; return; }
+    const dismissedKey = `floorstock_onboarding_dismissed_${currentUser.store.id}`;
+    if (localStorage.getItem(dismissedKey) === '1') { card.style.display = 'none'; return; }
+
+    const itemDone = items.length > 0;
+    const workerDone = (onboardingWorkerCount || 0) > 0;
+    if (itemDone && workerDone) { card.style.display = 'none'; return; }
+
+    card.style.display = 'block';
+    document.getElementById('onboardingStepItem').classList.toggle('done', itemDone);
+    document.getElementById('onboardingStepWorker').classList.toggle('done', workerDone);
+  }
+
+  document.getElementById('dismissOnboardingBtn').addEventListener('click', () => {
+    const dismissedKey = `floorstock_onboarding_dismissed_${currentUser.store.id}`;
+    localStorage.setItem(dismissedKey, '1');
+    document.getElementById('onboardingChecklist').style.display = 'none';
+  });
 
   function renderDashboard() {
     const total = items.length;

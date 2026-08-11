@@ -29,6 +29,10 @@ const stripe = STRIPE_SECRET_KEY ? new Stripe(STRIPE_SECRET_KEY) : null;
 // UPC lookup config (free, optional — USDA's database is skipped if no key is set)
 const USDA_FDC_API_KEY = process.env.USDA_FDC_API_KEY || '';
 
+// Founder dashboard access (optional — the dashboard is simply never shown to
+// anyone if this isn't set). Set this to your own manager account's email.
+const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
+
 // Make sure the database's directory exists (e.g. a Render disk mount path
 // like /data) before trying to open it — otherwise better-sqlite3 throws and
 // the whole server crashes on boot instead of starting.
@@ -305,6 +309,15 @@ function requireAuth(req, res, next) {
 function requireManager(req, res, next) {
   if (!req.auth) return res.status(401).json({ error: 'Not signed in.' });
   if (req.auth.role !== 'manager') return res.status(403).json({ error: 'Manager access required.' });
+  next();
+}
+function requireAdmin(req, res, next) {
+  if (!req.auth || req.auth.role !== 'manager') return res.status(403).json({ error: 'Not authorized.' });
+  if (!ADMIN_EMAIL) return res.status(403).json({ error: 'Not authorized.' });
+  const user = db.prepare('SELECT email FROM users WHERE id = ?').get(req.auth.userId);
+  if (!user || !user.email || user.email.trim().toLowerCase() !== ADMIN_EMAIL) {
+    return res.status(403).json({ error: 'Not authorized.' });
+  }
   next();
 }
 
@@ -676,6 +689,72 @@ app.get('/api/billing/confirm-checkout', requireManager, async (req, res) => {
   } catch (e) {
     res.status(502).json({ error: `Couldn\u2019t confirm checkout: ${e.message}` });
   }
+});
+
+// =====================================================================
+// FOUNDER DASHBOARD (you only — gated by ADMIN_EMAIL, not a store concept)
+// =====================================================================
+
+let priceAmountCache = null; // { monthly: dollars|null, annual: dollars|null }, fetched once and reused
+
+async function getPriceAmounts() {
+  if (priceAmountCache) return priceAmountCache;
+  const result = { monthly: null, annual: null };
+  if (!stripe) { priceAmountCache = result; return result; }
+  try {
+    if (STRIPE_PRICE_ID_MONTHLY) {
+      const p = await stripe.prices.retrieve(STRIPE_PRICE_ID_MONTHLY);
+      if (p.unit_amount != null) result.monthly = p.unit_amount / 100;
+    }
+    if (STRIPE_PRICE_ID_ANNUAL) {
+      const p = await stripe.prices.retrieve(STRIPE_PRICE_ID_ANNUAL);
+      if (p.unit_amount != null) result.annual = p.unit_amount / 100;
+    }
+  } catch (e) {
+    // if Stripe can't be reached, MRR just comes back as an estimate of 0 — never breaks the dashboard
+  }
+  priceAmountCache = result;
+  return result;
+}
+
+app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
+  const stores = db.prepare('SELECT * FROM stores').all();
+  const now = Date.now();
+
+  const totalStores = stores.length;
+  const trialing = stores.filter(s => s.subscription_status === 'trialing');
+  const active = stores.filter(s => s.subscription_status === 'active');
+  const canceled = stores.filter(s => s.subscription_status === 'canceled');
+  const pastDue = stores.filter(s => s.subscription_status === 'past_due');
+  const activeMonthly = active.filter(s => s.subscription_plan === 'monthly').length;
+  const activeAnnual = active.filter(s => s.subscription_plan === 'annual').length;
+  const activeUnknownPlan = active.length - activeMonthly - activeAnnual;
+
+  const prices = await getPriceAmounts();
+  const mrr = (activeMonthly * (prices.monthly || 0)) + (activeAnnual * ((prices.annual || 0) / 12));
+
+  const trialEndingSoon = trialing
+    .filter(s => s.trial_ends_at && (new Date(s.trial_ends_at).getTime() - now) <= 3 * 24 * 60 * 60 * 1000)
+    .map(s => ({ id: s.id, name: s.name, trialEndsAt: s.trial_ends_at }))
+    .sort((a, b) => new Date(a.trialEndsAt) - new Date(b.trialEndsAt));
+
+  const recentSignups = [...stores]
+    .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+    .slice(0, 10)
+    .map(s => ({ id: s.id, name: s.name, createdAt: s.created_at, status: s.subscription_status }));
+
+  res.json({
+    totalStores,
+    trialingCount: trialing.length,
+    activeCount: active.length,
+    activeMonthly, activeAnnual, activeUnknownPlan,
+    canceledCount: canceled.length,
+    pastDueCount: pastDue.length,
+    mrr: Math.round(mrr * 100) / 100,
+    mrrEstimated: !(prices.monthly || prices.annual),
+    trialEndingSoon,
+    recentSignups,
+  });
 });
 
 function applySubscriptionToStore(storeId, stripeCustomerId, subscription, plan) {
@@ -1345,4 +1424,5 @@ app.listen(PORT, () => {
   console.log(RESEND_API_KEY ? `Digest email enabled (checks hourly, sends at ${DIGEST_HOUR_UTC}:00 UTC per store's chosen frequency)` : 'Digest email disabled (no RESEND_API_KEY set)');
   console.log(RESEND_API_KEY ? 'Weekly per-store backup email enabled' : 'Weekly per-store backup email disabled (no RESEND_API_KEY set)');
   console.log(USDA_FDC_API_KEY ? 'USDA FoodData Central UPC source enabled' : 'USDA FoodData Central UPC source disabled (no USDA_FDC_API_KEY set)');
+  console.log(ADMIN_EMAIL ? `Founder dashboard enabled for ${ADMIN_EMAIL}` : 'Founder dashboard disabled (no ADMIN_EMAIL set)');
 });
