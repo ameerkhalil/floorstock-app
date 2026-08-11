@@ -186,7 +186,8 @@ db.exec(`
     reason TEXT NOT NULL,
     was_expired INTEGER NOT NULL,
     removed_by TEXT,
-    removed_at TEXT NOT NULL
+    removed_at TEXT NOT NULL,
+    vendor TEXT
   );
 
   CREATE TABLE IF NOT EXISTS backup_log (
@@ -209,7 +210,9 @@ db.exec(`
     cost_price REAL,
     selling_price REAL,
     sold_by TEXT,
-    sold_at TEXT NOT NULL
+    sold_at TEXT NOT NULL,
+    vendor TEXT,
+    category_id TEXT
   );
 
   -- Bulk scan queue: a fast scan only records the UPC (and a name/size if the
@@ -226,6 +229,17 @@ db.exec(`
     scanned_by TEXT,
     scanned_at TEXT NOT NULL
   );
+
+  CREATE TABLE IF NOT EXISTS tasks (
+    id TEXT PRIMARY KEY,
+    store_id TEXT NOT NULL,
+    title TEXT NOT NULL,
+    assigned_to TEXT NOT NULL,
+    assigned_by TEXT,
+    status TEXT NOT NULL DEFAULT 'open' CHECK (status IN ('open','done')),
+    created_at TEXT NOT NULL,
+    completed_at TEXT
+  );
 `);
 
 // ---------- migrations for older deployments ----------
@@ -238,6 +252,13 @@ if (!itemCols.includes('cost_price')) db.exec("ALTER TABLE items ADD COLUMN cost
 if (!itemCols.includes('selling_price')) db.exec("ALTER TABLE items ADD COLUMN selling_price REAL");
 if (!itemCols.includes('date_purchased')) db.exec("ALTER TABLE items ADD COLUMN date_purchased TEXT");
 if (!itemCols.includes('vendor')) db.exec("ALTER TABLE items ADD COLUMN vendor TEXT");
+
+const removalCols = db.prepare("PRAGMA table_info(removals)").all().map(c => c.name);
+if (!removalCols.includes('vendor')) db.exec("ALTER TABLE removals ADD COLUMN vendor TEXT");
+
+const salesCols = db.prepare("PRAGMA table_info(sales)").all().map(c => c.name);
+if (!salesCols.includes('vendor')) db.exec("ALTER TABLE sales ADD COLUMN vendor TEXT");
+if (!salesCols.includes('category_id')) db.exec("ALTER TABLE sales ADD COLUMN category_id TEXT");
 
 const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
 if (!userCols.includes('email')) db.exec("ALTER TABLE users ADD COLUMN email TEXT");
@@ -701,6 +722,67 @@ app.delete('/api/workers/:id', requireManager, (req, res) => {
   db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
   db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.params.id);
   logAudit(req.auth.storeId, currentUsername(req), 'worker_removed', `Removed worker login "${worker.username}"`);
+  res.status(204).end();
+});
+
+// =====================================================================
+// TASKS (manager assigns, any signed-in user at the store can see/complete)
+// =====================================================================
+
+function rowToTask(row) {
+  return {
+    id: row.id,
+    title: row.title,
+    assignedTo: row.assigned_to,
+    assignedBy: row.assigned_by || null,
+    status: row.status,
+    createdAt: row.created_at,
+    completedAt: row.completed_at || null,
+  };
+}
+
+app.get('/api/tasks', requireAuth, requireActiveSubscription, (req, res) => {
+  const rows = db.prepare('SELECT * FROM tasks WHERE store_id = ? ORDER BY (status = \'done\'), created_at DESC').all(req.auth.storeId);
+  res.json(rows.map(rowToTask));
+});
+
+app.get('/api/tasks/mine', requireAuth, requireActiveSubscription, (req, res) => {
+  const rows = db.prepare('SELECT * FROM tasks WHERE store_id = ? AND assigned_to = ? ORDER BY (status = \'done\'), created_at DESC').all(req.auth.storeId, req.auth.userId);
+  res.json(rows.map(rowToTask));
+});
+
+app.post('/api/tasks', requireManager, (req, res) => {
+  const { title, assignedTo } = req.body || {};
+  if (!title || !String(title).trim()) return res.status(400).json({ error: 'A task title is required.' });
+  if (!assignedTo || !String(assignedTo).trim()) return res.status(400).json({ error: 'Pick who this is assigned to.' });
+
+  const worker = db.prepare('SELECT username FROM users WHERE id = ? AND store_id = ?').get(assignedTo, req.auth.storeId);
+  if (!worker) return res.status(400).json({ error: 'That person isn\u2019t part of this store.' });
+
+  const id = newId();
+  db.prepare('INSERT INTO tasks (id, store_id, title, assigned_to, assigned_by, status, created_at) VALUES (?, ?, ?, ?, ?, \'open\', ?)')
+    .run(id, req.auth.storeId, title.trim(), assignedTo, currentUsername(req), nowIso());
+
+  logAudit(req.auth.storeId, currentUsername(req), 'task_assigned', `Assigned "${title.trim()}" to ${worker.username}`);
+
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
+  res.status(201).json(rowToTask(row));
+});
+
+app.put('/api/tasks/:id/complete', requireAuth, requireActiveSubscription, (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+  const newStatus = task.status === 'done' ? 'open' : 'done';
+  db.prepare('UPDATE tasks SET status = ?, completed_at = ? WHERE id = ?')
+    .run(newStatus, newStatus === 'done' ? nowIso() : null, task.id);
+  const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(task.id);
+  res.json(rowToTask(row));
+});
+
+app.delete('/api/tasks/:id', requireManager, (req, res) => {
+  const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!task) return res.status(404).json({ error: 'Task not found.' });
+  db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
   res.status(204).end();
 });
 
@@ -1431,11 +1513,12 @@ app.post('/api/items/:id/sell', requireAuth, requireActiveSubscription, (req, re
   db.prepare('UPDATE items SET quantity = ? WHERE id = ?').run(newQty, req.params.id);
 
   db.prepare(`
-    INSERT INTO sales (id, store_id, item_id, item_name, quantity, unit, cost_price, selling_price, sold_by, sold_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO sales (id, store_id, item_id, item_name, quantity, unit, cost_price, selling_price, sold_by, sold_at, vendor, category_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     newId(), req.auth.storeId, existing.id, existing.name, sellQty, existing.unit,
-    existing.cost_price, existing.selling_price, currentUsername(req), nowIso()
+    existing.cost_price, existing.selling_price, currentUsername(req), nowIso(),
+    existing.vendor || null, existing.category_id || null
   );
 
   const row = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
@@ -1479,12 +1562,12 @@ app.delete('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) 
 
   db.prepare('DELETE FROM items WHERE id = ?').run(req.params.id);
   db.prepare(`
-    INSERT INTO removals (id, store_id, item_name, category_id, quantity, unit, cost_price, selling_price, expiration_date, reason, was_expired, removed_by, removed_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO removals (id, store_id, item_name, category_id, quantity, unit, cost_price, selling_price, expiration_date, reason, was_expired, removed_by, removed_at, vendor)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     newId(), req.auth.storeId, existing.name, existing.category_id, existing.quantity, existing.unit,
     existing.cost_price, existing.selling_price, existing.expiration_date, reason, wasExpired ? 1 : 0,
-    currentUsername(req), nowIso()
+    currentUsername(req), nowIso(), existing.vendor || null
   );
 
   logAudit(req.auth.storeId, currentUsername(req), 'item_removed', `Removed "${existing.name}" (${existing.quantity} ${existing.unit}) from ${existing.location} \u2014 ${reason}`);
@@ -1631,6 +1714,53 @@ app.get('/api/reports/shrink', requireManager, (req, res) => {
     savedCost: Math.round(savedCost * 100) / 100,
     savedCount,
     totalRemovals: removalRows.length + saleRows.length,
+  });
+});
+
+// Waste (lost-to-expiration) broken down by category, employee, vendor,
+// product, and month — the "where is shrink actually coming from" view.
+app.get('/api/reports/analytics', requireManager, (req, res) => {
+  const days = Number(req.query.days) || 90;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const wasteRows = db.prepare(`
+    SELECT * FROM removals
+    WHERE store_id = ? AND removed_at >= ? AND (reason = 'expired' OR (reason = 'other' AND was_expired = 1))
+  `).all(req.auth.storeId, since);
+
+  const categories = new Map(db.prepare('SELECT id, name FROM categories WHERE store_id = ?').all(req.auth.storeId).map(c => [c.id, c.name]));
+
+  function groupBy(rows, keyFn, labelFn) {
+    const map = new Map();
+    for (const r of rows) {
+      const key = keyFn(r);
+      const label = labelFn(r, key);
+      if (!map.has(key)) map.set(key, { label, lostCost: 0, count: 0 });
+      const bucket = map.get(key);
+      bucket.lostCost += (r.cost_price || 0) * (r.quantity || 0);
+      bucket.count += 1;
+    }
+    return Array.from(map.values())
+      .map(b => ({ label: b.label, lostCost: Math.round(b.lostCost * 100) / 100, count: b.count }))
+      .sort((a, b) => b.lostCost - a.lostCost);
+  }
+
+  const byCategory = groupBy(wasteRows, r => r.category_id || 'none', r => r.category_id ? (categories.get(r.category_id) || 'Unknown category') : 'No category');
+  const byEmployee = groupBy(wasteRows, r => r.removed_by || 'unknown', r => r.removed_by || 'Unknown');
+  const byVendor = groupBy(wasteRows, r => r.vendor || 'none', r => r.vendor || 'No vendor on file');
+  const byProduct = groupBy(wasteRows, r => r.item_name, r => r.item_name).slice(0, 15);
+  const byMonth = groupBy(wasteRows, r => r.removed_at.slice(0, 7), r => {
+    const [y, m] = r.removed_at.slice(0, 7).split('-');
+    return new Date(Number(y), Number(m) - 1, 1).toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+  }).sort((a, b) => a.label.localeCompare(b.label)); // chronological, not by cost, for the month view
+
+  const totalLostCost = wasteRows.reduce((sum, r) => sum + (r.cost_price || 0) * (r.quantity || 0), 0);
+
+  res.json({
+    days,
+    totalLostCost: Math.round(totalLostCost * 100) / 100,
+    totalCount: wasteRows.length,
+    byCategory, byEmployee, byVendor, byProduct, byMonth,
   });
 });
 

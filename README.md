@@ -119,6 +119,18 @@ database, and a browser frontend.
   by your filters; a small printer icon on each item card prints just that one. Items
   without a real UPC still get a scannable CODE128 barcode generated from their
   internal placeholder code.
+- **Task assignment** — managers assign a task ("Check Red Bull cooler") to a specific
+  worker from Manage → Tasks. Both the assignee and the manager can see whether it's
+  been marked done; a "N tasks" badge in the header shows anyone their own open items.
+- **Store performance analytics** — Manage → Reports now also breaks down waste (items
+  lost to expiration) by category, employee, vendor, product, and month, so you can see
+  where shrink is actually coming from, not just the total.
+- **Inventory Rescue** — a dedicated section right on the dashboard (not buried in a
+  report) for items that are critical or soon and have a selling price: retail value,
+  cost at risk, a concrete markdown suggestion (e.g. "Run 2 for $6, starting today"),
+  and a recheck reminder. Suggestions never go below cost price. Deliberately doesn't
+  suggest a physical relocation ("move to front cooler") since the app has no real data
+  about your store's layout to base that on.
 
 ### Important: existing data isn't tied to a store
 
@@ -345,6 +357,12 @@ on login/registration and required on the routes marked "auth".
 | DELETE | `/api/workers/:id`            | manager  | Remove a worker login                      |
 | GET    | `/api/audit`                  | manager  | Recent activity log (last 200 entries)     |
 | GET    | `/api/reports/shrink`         | manager  | Money lost/saved from removals; query `?days=30` |
+| GET    | `/api/reports/analytics`      | manager  | Waste broken down by category/employee/vendor/product/month; query `?days=90` |
+| GET    | `/api/tasks`                  | any      | All tasks at the current store                |
+| GET    | `/api/tasks/mine`             | any      | Tasks assigned to the signed-in user           |
+| POST   | `/api/tasks`                  | manager  | Assign a task; body `{ title, assignedTo }`    |
+| PUT    | `/api/tasks/:id/complete`     | any      | Toggle a task between open/done                |
+| DELETE | `/api/tasks/:id`              | manager  | Remove a task                                  |
 | GET    | `/api/categories`             | any      | List your store's categories               |
 | POST   | `/api/categories`             | manager  | Create a category; body `{ name, color }` (color is `#rrggbb`) |
 | PUT    | `/api/categories/:id`         | manager  | Update a category's name/color             |

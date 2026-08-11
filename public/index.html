@@ -123,6 +123,13 @@
   .tag-price-cost { font-family: 'Inter', sans-serif; font-weight: 500; color: var(--muted); font-size: 11.5px; }
   .tag-markdown { font-size: 12px; font-weight: 700; color: var(--critical-text); background: var(--critical-tint); border-radius: 6px; padding: 5px 9px; margin-top: 6px; }
   .tag-markdown-pct { font-weight: 500; }
+  .rescue-card { background: var(--critical-tint); border-radius: 10px; padding: 12px 14px; }
+  .rescue-card-title { font-weight: 700; font-size: 13.5px; color: var(--ink); }
+  .rescue-card-sub { font-size: 12px; color: var(--critical-text); font-weight: 600; margin-top: 1px; }
+  .rescue-card-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 14px; margin-top: 10px; font-size: 12.5px; }
+  .rescue-card-grid dt { color: var(--muted-2); font-weight: 600; }
+  .rescue-card-grid dd { margin: 0; color: var(--ink); font-weight: 600; }
+  .rescue-card-action { background: #fff; border-radius: 7px; padding: 8px 10px; margin-top: 10px; font-size: 12.5px; font-weight: 600; color: var(--critical-text); }
   .tag-loc { display: flex; align-items: center; gap: 5px; margin-top: 10px; font-size: 13px; color: var(--muted-2); }
   .tag-bottom { display: flex; justify-content: space-between; align-items: flex-end; margin-top: 10px; }
   .tag-date { font-size: 12px; color: var(--muted); }
@@ -383,6 +390,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
           Sign out
         </button>
+        <button class="btn-ghost" id="myTasksBtn" style="display:none; background:rgba(46,110,255,0.1); color:var(--accent);">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          <span id="myTasksCount">0</span> tasks
+        </button>
         <button class="btn-ghost" id="pendingItemsBtn" style="display:none; background:rgba(245,166,35,0.14); color:var(--amber);">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
           <span id="pendingItemsCount">0</span> pending
@@ -436,6 +447,20 @@
             <span>Invite a worker from Manage &rarr; Workers</span>
           </div>
         </div>
+      </div>
+
+      <div id="rescueSection" style="display:none; background:#fff; border:1px solid var(--critical-band); border-radius:12px; padding:18px 20px; margin-bottom:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+          <div style="font-family:'Oswald', sans-serif; font-size:14px; font-weight:600; letter-spacing:0.4px; color:var(--critical-text); display:flex; align-items:center; gap:7px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/></svg>
+            INVENTORY RESCUE
+          </div>
+          <span id="rescueCount" style="font-size:12px; color:var(--muted);"></span>
+        </div>
+        <p style="font-size:12.5px; color:var(--muted-2); margin: 6px 0 14px;">
+          These are closest to expiring and still have a real chance to sell instead of going to waste.
+        </p>
+        <div id="rescueList" style="display:flex; flex-direction:column; gap:10px;"></div>
       </div>
 
       <div class="dash-wrap" id="dashWrap">
@@ -643,6 +668,22 @@
   </div>
 
   <!-- pending items modal -->
+  <!-- my tasks modal -->
+  <div class="modal-overlay" id="myTasksOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">MY TASKS</div>
+        <button class="modal-close" id="myTasksCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <div id="myTasksList" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <div id="myTasksEmpty" style="font-size:13px; color:var(--muted); display:none;">Nothing assigned to you right now.</div>
+      </div>
+    </div>
+  </div>
+
   <div class="modal-overlay" id="pendingItemsOverlay">
     <div class="modal">
       <div class="modal-header">
@@ -805,6 +846,7 @@
         <button class="auth-tab active" id="mgrTabWorkers">Workers</button>
         <button class="auth-tab" id="mgrTabCategories">Categories</button>
         <button class="auth-tab" id="mgrTabAlerts">Alerts</button>
+        <button class="auth-tab" id="mgrTabTasks">Tasks</button>
         <button class="auth-tab" id="mgrTabReports">Reports</button>
         <button class="auth-tab" id="mgrTabActivity">Activity</button>
         <button class="auth-tab" id="mgrTabDigest">Email digest</button>
@@ -874,6 +916,26 @@
         <button type="button" class="add-worker-btn" id="saveThresholdsBtn">Save</button>
       </div>
 
+      <div id="mgrPaneTasks" style="padding: 18px; display:none;">
+        <div class="section-label" style="margin-top:0;">Assign a task</div>
+        <div class="auth-error" id="newTaskError" style="display:none;"></div>
+        <form id="newTaskForm">
+          <div class="auth-field">
+            <label>Task</label>
+            <input type="text" id="newTaskTitle" placeholder="e.g. Check Red Bull cooler">
+          </div>
+          <div class="auth-field">
+            <label>Assign to</label>
+            <select class="field-input" id="newTaskAssignee"></select>
+          </div>
+          <button type="submit" class="add-worker-btn">Assign</button>
+        </form>
+
+        <div class="section-label">All tasks</div>
+        <div id="allTasksList" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <div id="allTasksEmpty" style="font-size:13px; color:var(--muted); display:none;">No tasks yet.</div>
+      </div>
+
       <div id="mgrPaneReports" style="padding: 18px; display:none;">
         <div class="section-label" style="margin-top:0;">Shrink report</div>
         <p style="font-size:13px; color:var(--muted-2); line-height:1.5; margin-top:0; margin-bottom:14px;">
@@ -887,6 +949,13 @@
         </select>
         <div id="reportStats" style="display:grid; grid-template-columns:1fr 1fr; gap:10px;"></div>
         <div id="reportEmpty" style="font-size:13px;color:var(--muted); margin-top:14px; display:none;">No removals logged in this period yet.</div>
+
+        <div class="section-label">Where waste is coming from</div>
+        <p style="font-size:12.5px; color:var(--muted); line-height:1.5; margin-top:0; margin-bottom:12px;">
+          Based on items removed as expired over the same period.
+        </p>
+        <div id="analyticsBreakdowns"></div>
+        <div id="analyticsEmpty" style="font-size:13px;color:var(--muted); display:none;">Nothing to break down yet.</div>
       </div>
 
       <div id="mgrPaneDigest" style="padding: 18px; display:none;">
@@ -1183,6 +1252,7 @@
     loadOnboardingState();
     loadUrgencyThresholds();
     loadPendingItems();
+    loadMyTasksBadge();
     init();
   }
 
@@ -1398,6 +1468,7 @@
     document.getElementById('mgrTabWorkers').classList.toggle('active', which === 'workers');
     document.getElementById('mgrTabCategories').classList.toggle('active', which === 'categories');
     document.getElementById('mgrTabAlerts').classList.toggle('active', which === 'alerts');
+    document.getElementById('mgrTabTasks').classList.toggle('active', which === 'tasks');
     document.getElementById('mgrTabReports').classList.toggle('active', which === 'reports');
     document.getElementById('mgrTabActivity').classList.toggle('active', which === 'activity');
     document.getElementById('mgrTabDigest').classList.toggle('active', which === 'digest');
@@ -1405,6 +1476,7 @@
     document.getElementById('mgrPaneWorkers').style.display = which === 'workers' ? 'block' : 'none';
     document.getElementById('mgrPaneCategories').style.display = which === 'categories' ? 'block' : 'none';
     document.getElementById('mgrPaneAlerts').style.display = which === 'alerts' ? 'block' : 'none';
+    document.getElementById('mgrPaneTasks').style.display = which === 'tasks' ? 'block' : 'none';
     document.getElementById('mgrPaneReports').style.display = which === 'reports' ? 'block' : 'none';
     document.getElementById('mgrPaneActivity').style.display = which === 'activity' ? 'block' : 'none';
     document.getElementById('mgrPaneDigest').style.display = which === 'digest' ? 'block' : 'none';
@@ -1413,12 +1485,14 @@
     if (which === 'billing') loadBillingPane();
     if (which === 'categories') renderCategoryManagerList();
     if (which === 'alerts') loadThresholdsPane();
-    if (which === 'reports') loadShrinkReport();
+    if (which === 'tasks') loadTasksPane();
+    if (which === 'reports') { loadShrinkReport(); loadAnalytics(); }
     if (which === 'digest') loadDigestFrequency();
   }
   document.getElementById('mgrTabWorkers').addEventListener('click', () => switchMgrTab('workers'));
   document.getElementById('mgrTabCategories').addEventListener('click', () => switchMgrTab('categories'));
   document.getElementById('mgrTabAlerts').addEventListener('click', () => switchMgrTab('alerts'));
+  document.getElementById('mgrTabTasks').addEventListener('click', () => switchMgrTab('tasks'));
   document.getElementById('mgrTabReports').addEventListener('click', () => switchMgrTab('reports'));
   document.getElementById('mgrTabActivity').addEventListener('click', () => switchMgrTab('activity'));
   document.getElementById('mgrTabDigest').addEventListener('click', () => switchMgrTab('digest'));
@@ -1429,6 +1503,152 @@
     document.getElementById('soonDaysInput').value = urgencyThresholds.soonDays;
     document.getElementById('alertsThresholdError').style.display = 'none';
   }
+
+  // =====================================================================
+  // TASKS
+  // =====================================================================
+
+  async function loadMyTasksBadge() {
+    try {
+      const tasks = await apiRequest('/api/tasks/mine');
+      const openCount = tasks.filter(t => t.status === 'open').length;
+      const btn = document.getElementById('myTasksBtn');
+      document.getElementById('myTasksCount').textContent = openCount;
+      btn.style.display = openCount > 0 ? 'flex' : 'none';
+    } catch (e) {
+      // leave hidden if this fails
+    }
+  }
+
+  async function openMyTasksModal() {
+    document.getElementById('myTasksOverlay').classList.add('open');
+    try {
+      const tasks = await apiRequest('/api/tasks/mine');
+      renderMyTasksList(tasks);
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t load your tasks');
+    }
+  }
+  document.getElementById('myTasksBtn').addEventListener('click', openMyTasksModal);
+  document.getElementById('myTasksCloseBtn').addEventListener('click', () => {
+    document.getElementById('myTasksOverlay').classList.remove('open');
+  });
+  document.getElementById('myTasksOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'myTasksOverlay') document.getElementById('myTasksOverlay').classList.remove('open');
+  });
+
+  function renderMyTasksList(tasks) {
+    const listEl = document.getElementById('myTasksList');
+    const emptyEl = document.getElementById('myTasksEmpty');
+    if (tasks.length === 0) {
+      listEl.innerHTML = '';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    listEl.innerHTML = tasks.map(t => `
+      <div class="location-row ${t.status === 'done' ? 'current' : ''}" style="cursor:default;">
+        <span style="${t.status === 'done' ? 'text-decoration:line-through; opacity:0.7;' : ''}">${esc(t.title)}</span>
+        <button type="button" class="add-worker-btn" data-toggle-task="${t.id}" style="padding:6px 12px; font-size:12px; width:auto;">${t.status === 'done' ? 'Reopen' : 'Done'}</button>
+      </div>
+    `).join('');
+    listEl.querySelectorAll('[data-toggle-task]').forEach(btn => {
+      btn.addEventListener('click', () => toggleTask(btn.dataset.toggleTask, true));
+    });
+  }
+
+  async function toggleTask(id, isMyView) {
+    try {
+      await apiRequest(`/api/tasks/${id}/complete`, { method: 'PUT' });
+      if (isMyView) {
+        const tasks = await apiRequest('/api/tasks/mine');
+        renderMyTasksList(tasks);
+      } else {
+        loadTasksPane();
+      }
+      loadMyTasksBadge();
+      showToast('Updated');
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t update that task');
+    }
+  }
+
+  async function loadTasksPane() {
+    try {
+      const [workers, tasks] = await Promise.all([apiRequest('/api/workers'), apiRequest('/api/tasks')]);
+      const assigneeSel = document.getElementById('newTaskAssignee');
+      assigneeSel.innerHTML = workers.map(w => `<option value="${esc(w.id)}">${esc(w.username)}</option>`).join('');
+
+      const listEl = document.getElementById('allTasksList');
+      const emptyEl = document.getElementById('allTasksEmpty');
+      if (tasks.length === 0) {
+        listEl.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+      }
+      emptyEl.style.display = 'none';
+      const workerName = (id) => (workers.find(w => w.id === id) || {}).username || 'Unknown';
+      listEl.innerHTML = tasks.map(t => `
+        <div class="location-row ${t.status === 'done' ? 'current' : ''}" style="cursor:default; flex-wrap:wrap;">
+          <span style="${t.status === 'done' ? 'text-decoration:line-through; opacity:0.7;' : ''}">
+            ${esc(t.title)}
+            <div class="loc-addr">Assigned to ${esc(workerName(t.assignedTo))}</div>
+          </span>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="add-worker-btn" data-toggle-task="${t.id}" style="padding:6px 12px; font-size:12px; width:auto;">${t.status === 'done' ? 'Reopen' : 'Done'}</button>
+            <button type="button" class="del-btn" data-delete-task="${t.id}" style="padding:6px 10px;">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+            </button>
+          </div>
+        </div>
+      `).join('');
+      listEl.querySelectorAll('[data-toggle-task]').forEach(btn => {
+        btn.addEventListener('click', () => toggleTask(btn.dataset.toggleTask, false));
+      });
+      listEl.querySelectorAll('[data-delete-task]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          try {
+            await apiRequest(`/api/tasks/${btn.dataset.deleteTask}`, { method: 'DELETE' });
+            loadTasksPane();
+            showToast('Task removed');
+          } catch (e) {
+            showToast(e.message || 'Couldn\u2019t remove that task');
+          }
+        });
+      });
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t load tasks');
+    }
+  }
+
+  document.getElementById('newTaskForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('newTaskError');
+    const title = document.getElementById('newTaskTitle').value.trim();
+    const assignedTo = document.getElementById('newTaskAssignee').value;
+    if (!title) {
+      errEl.textContent = 'Enter what needs to be done.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!assignedTo) {
+      errEl.textContent = 'Add a worker first \u2014 there\u2019s no one to assign this to yet.';
+      errEl.style.display = 'block';
+      return;
+    }
+    try {
+      await apiRequest('/api/tasks', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, assignedTo }),
+      });
+      errEl.style.display = 'none';
+      document.getElementById('newTaskTitle').value = '';
+      showToast('Task assigned');
+      loadTasksPane();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    }
+  });
 
   document.getElementById('saveThresholdsBtn').addEventListener('click', async () => {
     const errEl = document.getElementById('alertsThresholdError');
@@ -1798,7 +2018,52 @@
     }
   }
 
-  document.getElementById('reportPeriodSelect').addEventListener('change', loadShrinkReport);
+  document.getElementById('reportPeriodSelect').addEventListener('change', () => { loadShrinkReport(); loadAnalytics(); });
+
+  async function loadAnalytics() {
+    const days = document.getElementById('reportPeriodSelect').value;
+    try {
+      const a = await apiRequest(`/api/reports/analytics?days=${encodeURIComponent(days)}`);
+      const wrapEl = document.getElementById('analyticsBreakdowns');
+      const emptyEl = document.getElementById('analyticsEmpty');
+      if (a.totalCount === 0) {
+        wrapEl.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+      }
+      emptyEl.style.display = 'none';
+
+      const sections = [
+        { title: 'By category', rows: a.byCategory },
+        { title: 'By employee', rows: a.byEmployee },
+        { title: 'By vendor', rows: a.byVendor },
+        { title: 'By product', rows: a.byProduct },
+        { title: 'By month', rows: a.byMonth, chronological: true },
+      ];
+
+      wrapEl.innerHTML = sections.map(s => {
+        if (s.rows.length === 0) return '';
+        const maxCost = Math.max(...s.rows.map(r => r.lostCost), 0.01);
+        const rowsHtml = s.rows.slice(0, 8).map(r => `
+          <div style="margin-bottom:8px;">
+            <div style="display:flex; justify-content:space-between; font-size:12.5px; margin-bottom:3px;">
+              <span style="font-weight:600; color:var(--muted-2);">${esc(r.label)}</span>
+              <span style="font-weight:700;">$${r.lostCost.toFixed(2)}</span>
+            </div>
+            <div style="background:var(--surface); border-radius:4px; height:6px; overflow:hidden;">
+              <div style="background:var(--expired-band); height:100%; width:${Math.max(4, (r.lostCost / maxCost) * 100)}%;"></div>
+            </div>
+          </div>
+        `).join('');
+        return `<div style="margin-bottom:18px;">
+          <div style="font-size:12px; font-weight:700; color:var(--muted-2); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:8px;">${esc(s.title)}</div>
+          ${rowsHtml}
+        </div>`;
+      }).join('');
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t load analytics');
+    }
+  }
 
   // =====================================================================
   // BILLING (manager panel + paywall)
@@ -2555,6 +2820,56 @@
     renderGrid();
     renderDashboard();
     renderOnboardingChecklist();
+    renderRescueSection();
+  }
+
+  // ---------- inventory rescue ----------
+  function renderRescueSection() {
+    const section = document.getElementById('rescueSection');
+    const candidates = items
+      .filter(it => it.sellingPrice && it.quantity > 0)
+      .map(it => ({ item: it, u: urgency(it.expirationDate), days: daysUntil(it.expirationDate) }))
+      .filter(x => x.u === 'critical' || x.u === 'soon')
+      .sort((a, b) => a.days - b.days);
+
+    if (candidates.length === 0) {
+      section.style.display = 'none';
+      return;
+    }
+    section.style.display = 'block';
+    document.getElementById('rescueCount').textContent = `${candidates.length} item${candidates.length !== 1 ? 's' : ''}`;
+
+    const shown = candidates.slice(0, 6);
+    document.getElementById('rescueList').innerHTML = shown.map(({ item: it, u, days }) => {
+      const discountPct = u === 'critical' ? 40 : 20;
+      let markdownPrice = it.sellingPrice * (1 - discountPct / 100);
+      if (it.costPrice && markdownPrice < it.costPrice) markdownPrice = it.costPrice;
+      const retailValue = it.quantity * it.sellingPrice;
+      const costAtRisk = it.costPrice ? it.quantity * it.costPrice : null;
+      const recheckDays = u === 'critical' ? 3 : 5;
+
+      let actionText;
+      if (it.quantity >= 2 && markdownPrice < it.sellingPrice - 0.005) {
+        const bundleTotal = Math.round(markdownPrice * 2 * 4) / 4; // round to nearest quarter for a clean price
+        actionText = `Run 2 for $${bundleTotal.toFixed(2)}, starting today`;
+      } else if (markdownPrice < it.sellingPrice - 0.005) {
+        actionText = `Mark down to $${markdownPrice.toFixed(2)}, starting today`;
+      } else {
+        actionText = `Consider a small discount to help it move`;
+      }
+
+      return `
+        <div class="rescue-card">
+          <div class="rescue-card-title">${esc(it.quantity)} ${esc(it.unit)} of ${esc(it.name)}</div>
+          <div class="rescue-card-sub">Expires in ${days} day${days !== 1 ? 's' : ''} \u2014 ${esc(it.location)}</div>
+          <dl class="rescue-card-grid">
+            <dt>Retail value</dt><dd>$${retailValue.toFixed(2)}</dd>
+            ${costAtRisk !== null ? `<dt>Cost at risk</dt><dd>$${costAtRisk.toFixed(2)}</dd>` : '<dt></dt><dd></dd>'}
+          </dl>
+          <div class="rescue-card-action">${esc(actionText)}<br><span style="font-weight:500; opacity:0.85;">Recheck in ${recheckDays} days</span></div>
+        </div>
+      `;
+    }).join('');
   }
 
   // ---------- onboarding checklist ----------
