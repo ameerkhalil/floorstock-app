@@ -65,7 +65,9 @@ db.exec(`
     stripe_customer_id TEXT,
     stripe_subscription_id TEXT,
     subscription_plan TEXT,
-    digest_frequency TEXT NOT NULL DEFAULT 'daily'
+    digest_frequency TEXT NOT NULL DEFAULT 'daily',
+    critical_days INTEGER NOT NULL DEFAULT 3,
+    soon_days INTEGER NOT NULL DEFAULT 60
   );
 
   CREATE TABLE IF NOT EXISTS stores (
@@ -117,7 +119,8 @@ db.exec(`
     size_value REAL,
     size_unit TEXT,
     cost_price REAL,
-    selling_price REAL
+    selling_price REAL,
+    date_purchased TEXT
   );
 
   CREATE TABLE IF NOT EXISTS categories (
@@ -217,6 +220,7 @@ if (!itemCols.includes('size_value')) db.exec("ALTER TABLE items ADD COLUMN size
 if (!itemCols.includes('size_unit')) db.exec("ALTER TABLE items ADD COLUMN size_unit TEXT");
 if (!itemCols.includes('cost_price')) db.exec("ALTER TABLE items ADD COLUMN cost_price REAL");
 if (!itemCols.includes('selling_price')) db.exec("ALTER TABLE items ADD COLUMN selling_price REAL");
+if (!itemCols.includes('date_purchased')) db.exec("ALTER TABLE items ADD COLUMN date_purchased TEXT");
 
 const userCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
 if (!userCols.includes('email')) db.exec("ALTER TABLE users ADD COLUMN email TEXT");
@@ -268,6 +272,10 @@ if (storesNeedingOrg.length) {
 
 const sessionCols = db.prepare("PRAGMA table_info(sessions)").all().map(c => c.name);
 if (!sessionCols.includes('organization_id')) db.exec("ALTER TABLE sessions ADD COLUMN organization_id TEXT");
+
+const orgCols = db.prepare("PRAGMA table_info(organizations)").all().map(c => c.name);
+if (!orgCols.includes('critical_days')) db.exec("ALTER TABLE organizations ADD COLUMN critical_days INTEGER NOT NULL DEFAULT 3");
+if (!orgCols.includes('soon_days')) db.exec("ALTER TABLE organizations ADD COLUMN soon_days INTEGER NOT NULL DEFAULT 60");
 
 // ---------- Stripe webhook (needs the RAW body for signature verification,
 // so this is registered before express.json() touches the request) ----------
@@ -1104,6 +1112,7 @@ function rowToItem(row) {
     unit: row.unit,
     location: row.location,
     dateAdded: row.date_added,
+    datePurchased: row.date_purchased || null,
     categoryId: row.category_id || null,
     sizeValue: row.size_value === null || row.size_value === undefined ? null : row.size_value,
     sizeUnit: row.size_unit || null,
@@ -1113,7 +1122,7 @@ function rowToItem(row) {
 }
 
 function validatePayload(body) {
-  const { upc, name, expirationDate, quantity, unit, location, sizeValue, sizeUnit, costPrice, sellingPrice } = body || {};
+  const { upc, name, expirationDate, quantity, unit, location, sizeValue, sizeUnit, costPrice, sellingPrice, datePurchased } = body || {};
   if (!upc || typeof upc !== 'string' || !upc.trim()) return 'UPC is required.';
   if (!name || typeof name !== 'string' || !name.trim()) return 'Product name is required.';
   if (!expirationDate || typeof expirationDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(expirationDate)) {
@@ -1135,6 +1144,9 @@ function validatePayload(body) {
   }
   if (sellingPrice !== undefined && sellingPrice !== null && sellingPrice !== '' && (typeof sellingPrice !== 'number' || isNaN(sellingPrice) || sellingPrice < 0)) {
     return 'Selling price must be a non-negative number.';
+  }
+  if (datePurchased !== undefined && datePurchased !== null && datePurchased !== '' && !/^\d{4}-\d{2}-\d{2}$/.test(datePurchased)) {
+    return 'Date purchased must be a valid date.';
   }
   return null;
 }
@@ -1162,7 +1174,7 @@ function escapeCsvValue(val) {
 function buildInventoryCsv(storeId) {
   const rows = db.prepare('SELECT * FROM items WHERE store_id = ? ORDER BY expiration_date ASC').all(storeId);
   const categories = new Map(db.prepare('SELECT id, name FROM categories WHERE store_id = ?').all(storeId).map(c => [c.id, c.name]));
-  const header = ['Product Name', 'UPC', 'Category', 'Size', 'Expiration Date', 'Quantity', 'Unit', 'Location', 'Cost Price', 'Selling Price', 'Margin %', 'Date Added'];
+  const header = ['Product Name', 'UPC', 'Category', 'Size', 'Expiration Date', 'Quantity', 'Unit', 'Location', 'Cost Price', 'Selling Price', 'Margin %', 'Date Purchased', 'Date Added'];
   const lines = [header.join(',')];
   for (const r of rows) {
     const categoryName = r.category_id ? (categories.get(r.category_id) || '') : '';
@@ -1174,7 +1186,7 @@ function buildInventoryCsv(storeId) {
       escapeCsvValue(r.name), escapeCsvValue(r.upc), escapeCsvValue(categoryName), escapeCsvValue(size), escapeCsvValue(r.expiration_date),
       escapeCsvValue(r.quantity), escapeCsvValue(r.unit), escapeCsvValue(r.location),
       escapeCsvValue(r.cost_price || ''), escapeCsvValue(r.selling_price || ''), escapeCsvValue(marginPct),
-      escapeCsvValue(r.date_added),
+      escapeCsvValue(r.date_purchased || ''), escapeCsvValue(r.date_added),
     ].join(','));
   }
   return lines.join('\r\n');
@@ -1236,6 +1248,7 @@ const IMPORT_HEADER_ALIASES = {
   sizeUnit: ['sizeunit'],
   costPrice: ['costprice', 'cost'],
   sellingPrice: ['sellingprice', 'price', 'sellprice', 'retailprice'],
+  datePurchased: ['datepurchased', 'purchasedate', 'purchased'],
 };
 
 function matchHeaderKey(headerCell) {
@@ -1272,8 +1285,8 @@ app.post('/api/items/import.csv', requireAuth, requireActiveSubscription, (req, 
   let paletteIdx = 0;
 
   const insertItem = db.prepare(`
-    INSERT INTO items (id, store_id, upc, name, expiration_date, quantity, unit, location, date_added, category_id, size_value, size_unit, cost_price, selling_price)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO items (id, store_id, upc, name, expiration_date, quantity, unit, location, date_added, category_id, size_value, size_unit, cost_price, selling_price, date_purchased)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertCategory = db.prepare('INSERT INTO categories (id, store_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)');
 
@@ -1320,11 +1333,13 @@ app.post('/api/items/import.csv', requireAuth, requireActiveSubscription, (req, 
       const costPrice = costPriceRaw ? Number(costPriceRaw.replace(/[$,]/g, '')) : null;
       const sellingPriceRaw = get('sellingPrice');
       const sellingPrice = sellingPriceRaw ? Number(sellingPriceRaw.replace(/[$,]/g, '')) : null;
+      const datePurchased = normalizeImportDate(get('datePurchased'));
 
       insertItem.run(
         newId(), req.auth.storeId, upc, name, expirationDate, quantity, get('unit') || 'each', location, dateAdded,
         categoryId, Number.isFinite(sizeValue) ? sizeValue : null, get('sizeUnit') || null,
-        Number.isFinite(costPrice) ? costPrice : null, Number.isFinite(sellingPrice) ? sellingPrice : null
+        Number.isFinite(costPrice) ? costPrice : null, Number.isFinite(sellingPrice) ? sellingPrice : null,
+        datePurchased || null
       );
       imported++;
     }
@@ -1342,17 +1357,18 @@ app.post('/api/items', requireAuth, requireActiveSubscription, (req, res) => {
   const error = validatePayload(req.body);
   if (error) return res.status(400).json({ error });
 
-  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit, costPrice, sellingPrice } = req.body;
+  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit, costPrice, sellingPrice, datePurchased } = req.body;
   const id = newId();
   const dateAdded = nowIso();
 
   db.prepare(`
-    INSERT INTO items (id, store_id, upc, name, expiration_date, quantity, unit, location, date_added, category_id, size_value, size_unit, cost_price, selling_price)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO items (id, store_id, upc, name, expiration_date, quantity, unit, location, date_added, category_id, size_value, size_unit, cost_price, selling_price, date_purchased)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id, req.auth.storeId, upc.trim(), name.trim(), expirationDate, quantity, unit.trim(), location.trim(), dateAdded,
     categoryId || null, (sizeValue === '' || sizeValue === undefined) ? null : sizeValue, sizeUnit || null,
-    (costPrice === '' || costPrice === undefined) ? null : costPrice, (sellingPrice === '' || sellingPrice === undefined) ? null : sellingPrice
+    (costPrice === '' || costPrice === undefined) ? null : costPrice, (sellingPrice === '' || sellingPrice === undefined) ? null : sellingPrice,
+    (datePurchased === '' || datePurchased === undefined) ? null : datePurchased
   );
 
   logAudit(req.auth.storeId, currentUsername(req), 'item_added', `Added ${quantity} ${unit.trim()} of "${name.trim()}" at ${location.trim()}`);
@@ -1411,15 +1427,16 @@ app.put('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) => 
   const error = validatePayload(req.body);
   if (error) return res.status(400).json({ error });
 
-  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit, costPrice, sellingPrice } = req.body;
+  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit, costPrice, sellingPrice, datePurchased } = req.body;
   db.prepare(`
     UPDATE items
-    SET upc = ?, name = ?, expiration_date = ?, quantity = ?, unit = ?, location = ?, category_id = ?, size_value = ?, size_unit = ?, cost_price = ?, selling_price = ?
+    SET upc = ?, name = ?, expiration_date = ?, quantity = ?, unit = ?, location = ?, category_id = ?, size_value = ?, size_unit = ?, cost_price = ?, selling_price = ?, date_purchased = ?
     WHERE id = ? AND store_id = ?
   `).run(
     upc.trim(), name.trim(), expirationDate, quantity, unit.trim(), location.trim(),
     categoryId || null, (sizeValue === '' || sizeValue === undefined) ? null : sizeValue, sizeUnit || null,
     (costPrice === '' || costPrice === undefined) ? null : costPrice, (sellingPrice === '' || sellingPrice === undefined) ? null : sellingPrice,
+    (datePurchased === '' || datePurchased === undefined) ? null : datePurchased,
     req.params.id, req.auth.storeId
   );
 
@@ -1502,22 +1519,28 @@ function daysUntil(dateStr) {
   const target = new Date(dateStr + 'T00:00:00Z');
   return Math.round((target - today) / 86400000);
 }
-function urgencyOf(dateStr) {
+function urgencyOf(dateStr, criticalDays, soonDays) {
+  const critical = Number.isFinite(criticalDays) ? criticalDays : 3;
+  const soon = Number.isFinite(soonDays) ? soonDays : 60;
   const d = daysUntil(dateStr);
   if (d < 0) return 'expired';
-  if (d <= 3) return 'critical';
-  if (d <= 14) return 'soon';
+  if (d <= critical) return 'critical';
+  if (d <= soon) return 'soon';
   return 'ok';
 }
 
 function getAlertItemsForStore(storeId) {
   const rows = db.prepare('SELECT * FROM items WHERE store_id = ? ORDER BY expiration_date ASC').all(storeId);
-  return rows.filter(r => ['expired', 'critical', 'soon'].includes(urgencyOf(r.expiration_date)));
+  const store = db.prepare('SELECT organization_id FROM stores WHERE id = ?').get(storeId);
+  const org = store ? db.prepare('SELECT critical_days, soon_days FROM organizations WHERE id = ?').get(store.organization_id) : null;
+  const criticalDays = org ? org.critical_days : 3;
+  const soonDays = org ? org.soon_days : 60;
+  return rows.filter(r => ['expired', 'critical', 'soon'].includes(urgencyOf(r.expiration_date, criticalDays, soonDays)));
 }
 
-function buildDigestHtml(store, alertItems) {
+function buildDigestHtml(store, alertItems, criticalDays, soonDays) {
   const rowsHtml = alertItems.map(it => {
-    const u = urgencyOf(it.expiration_date);
+    const u = urgencyOf(it.expiration_date, criticalDays, soonDays);
     const color = u === 'expired' ? '#C1443C' : u === 'critical' ? '#D9822B' : '#C9A227';
     const label = u === 'expired' ? 'EXPIRED' : u === 'critical' ? 'CRITICAL' : 'SOON';
     return `<tr>
@@ -1571,10 +1594,11 @@ async function sendEmail({ to, subject, html, attachments }) {
 }
 
 async function sendDigestEmail(store, toEmail, alertItems) {
+  const org = db.prepare('SELECT critical_days, soon_days FROM organizations WHERE id = ?').get(store.organization_id);
   return sendEmail({
     to: toEmail,
     subject: `FloorStock: ${alertItems.length} item${alertItems.length !== 1 ? 's' : ''} need attention at ${store.name}`,
-    html: buildDigestHtml(store, alertItems),
+    html: buildDigestHtml(store, alertItems, org && org.critical_days, org && org.soon_days),
   });
 }
 
@@ -1604,6 +1628,26 @@ app.put('/api/store/digest-frequency', requireManager, (req, res) => {
   if (!DIGEST_FREQUENCIES.includes(frequency)) return res.status(400).json({ error: 'Invalid frequency.' });
   db.prepare('UPDATE stores SET digest_frequency = ? WHERE id = ?').run(frequency, req.auth.storeId);
   res.json({ frequency });
+});
+
+// Urgency labels (Critical / Soon / Fresh) are subjective per business, so the
+// day thresholds are configurable per organization instead of hardcoded.
+app.get('/api/org/urgency-thresholds', requireAuth, (req, res) => {
+  const org = db.prepare('SELECT critical_days, soon_days FROM organizations WHERE id = ?').get(req.auth.organizationId);
+  res.json({ criticalDays: (org && org.critical_days) || 3, soonDays: (org && org.soon_days) || 60 });
+});
+
+app.put('/api/org/urgency-thresholds', requireManager, (req, res) => {
+  const criticalDays = Number(req.body && req.body.criticalDays);
+  const soonDays = Number(req.body && req.body.soonDays);
+  if (!Number.isFinite(criticalDays) || criticalDays < 0 || criticalDays > 365) {
+    return res.status(400).json({ error: 'Critical threshold must be between 0 and 365 days.' });
+  }
+  if (!Number.isFinite(soonDays) || soonDays <= criticalDays || soonDays > 730) {
+    return res.status(400).json({ error: 'Soon threshold must be greater than the critical threshold, up to 730 days.' });
+  }
+  db.prepare('UPDATE organizations SET critical_days = ?, soon_days = ? WHERE id = ?').run(criticalDays, soonDays, req.auth.organizationId);
+  res.json({ criticalDays, soonDays });
 });
 
 function daysSinceLastDigest(storeId) {

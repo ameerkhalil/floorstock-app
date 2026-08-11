@@ -85,6 +85,18 @@ database, and a browser frontend.
   Stripe's quantity automatically matching the number of locations, so adding a 4th
   store bumps the subscription instead of needing a separate signup. Workers are still
   scoped to exactly one location, same as before.
+- **Date purchased** — an optional field on every item, alongside expiration date.
+  Defaults to today when adding a new tag; included in CSV export/import.
+- **Remembered locations** — the "Location on floor" field autocompletes from
+  locations you've already used at this store, so re-typing "Cooler 5" gets faster the
+  more you use it. You can still type a brand new location any time.
+- **Configurable expiration labels** — "Critical," "Soon," and "Fresh" are subjective
+  per business. Manage → Alerts lets you set your own day thresholds (defaults: Critical
+  within 3 days, Soon within 60 days) &mdash; applies to the dashboard, item cards, and the
+  digest email.
+- **"No barcode" items** — some products don't have a UPC. Check "This item doesn't
+  have a barcode" in the New Tag form to skip the UPC field entirely; the item shows
+  "No barcode" instead of a blank or fake code.
 
 ### Important: existing data isn't tied to a store
 
@@ -317,6 +329,8 @@ on login/registration and required on the routes marked "auth".
 | DELETE | `/api/categories/:id`         | manager  | Remove a category (items keep their other data, category just clears) |
 | GET    | `/api/store/digest-frequency` | manager  | Current email frequency setting            |
 | PUT    | `/api/store/digest-frequency` | manager  | Update it; body `{ frequency }` (daily/every_other_day/weekly/biweekly/monthly) |
+| GET    | `/api/org/urgency-thresholds` | any      | Current Critical/Soon day thresholds       |
+| PUT    | `/api/org/urgency-thresholds` | manager  | Update them; body `{ criticalDays, soonDays }` |
 | POST   | `/api/digest/send-test`       | manager  | Send the manager a digest email right now  |
 | POST   | `/api/backup/send-test`       | manager  | Send the manager a backup email right now  |
 | GET    | `/api/billing/status`         | any      | Current trial/subscription status          |

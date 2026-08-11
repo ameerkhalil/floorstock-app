@@ -479,6 +479,10 @@
               <span id="scanBtnLabel">Scan</span>
             </button>
           </div>
+          <label style="display:flex; align-items:center; gap:7px; margin-top:8px; font-size:12.5px; font-weight:600; color:var(--muted-2); cursor:pointer;">
+            <input type="checkbox" id="noUpcCheckbox" style="width:15px; height:15px; margin:0;">
+            This item doesn&rsquo;t have a barcode
+          </label>
           <video id="scanVideo" muted playsinline></video>
           <div class="scan-error" id="scanError" style="display:none;"></div>
           <div class="lookup-note" id="lookupNote"></div>
@@ -523,8 +527,13 @@
           </div>
           <div>
             <label class="field-label">Location on floor</label>
-            <input class="field-input" id="locInput" placeholder="e.g. Aisle 4, Shelf B">
+            <input class="field-input" id="locInput" placeholder="e.g. Aisle 4, Shelf B" list="knownLocationsList" autocomplete="off">
+            <datalist id="knownLocationsList"></datalist>
           </div>
+        </div>
+        <div>
+          <label class="field-label">Date purchased <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+          <input class="field-input" type="date" id="datePurchasedInput">
         </div>
         <div class="row-2">
           <div>
@@ -696,6 +705,7 @@
       <div class="auth-tabs" style="margin: 14px 18px 0;">
         <button class="auth-tab active" id="mgrTabWorkers">Workers</button>
         <button class="auth-tab" id="mgrTabCategories">Categories</button>
+        <button class="auth-tab" id="mgrTabAlerts">Alerts</button>
         <button class="auth-tab" id="mgrTabReports">Reports</button>
         <button class="auth-tab" id="mgrTabActivity">Activity</button>
         <button class="auth-tab" id="mgrTabDigest">Email digest</button>
@@ -737,6 +747,32 @@
         <div class="section-label" style="margin-top:0;">Recent activity</div>
         <div id="activityList" style="max-height:400px; overflow-y:auto;"></div>
         <div id="activityEmpty" style="font-size:13px;color:var(--muted);display:none;">No activity yet.</div>
+      </div>
+
+      <div id="mgrPaneAlerts" style="padding: 18px; display:none;">
+        <div class="section-label" style="margin-top:0;">Expiration labels</div>
+        <p style="font-size:13px; color:var(--muted-2); line-height:1.5; margin-top:0; margin-bottom:14px;">
+          What counts as "Critical" or "Soon" is up to you &mdash; set the day thresholds that
+          make sense for your inventory. Anything past "Soon" shows as "Fresh."
+        </p>
+        <div class="row-2">
+          <div>
+            <label class="field-label">Critical within</label>
+            <div style="position:relative;">
+              <input class="field-input mono" type="number" min="0" max="365" id="criticalDaysInput" style="padding-right:44px;">
+              <span style="position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:12.5px;">days</span>
+            </div>
+          </div>
+          <div>
+            <label class="field-label">Soon within</label>
+            <div style="position:relative;">
+              <input class="field-input mono" type="number" min="0" max="730" id="soonDaysInput" style="padding-right:44px;">
+              <span style="position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:12.5px;">days</span>
+            </div>
+          </div>
+        </div>
+        <div class="auth-error" id="alertsThresholdError" style="display:none;"></div>
+        <button type="button" class="add-worker-btn" id="saveThresholdsBtn">Save</button>
       </div>
 
       <div id="mgrPaneReports" style="padding: 18px; display:none;">
@@ -1043,7 +1079,18 @@
     handleCheckoutRedirect();
     checkAdminAccess();
     loadOnboardingState();
+    loadUrgencyThresholds();
     init();
+  }
+
+  async function loadUrgencyThresholds() {
+    try {
+      const t = await apiRequest('/api/org/urgency-thresholds');
+      urgencyThresholds = { criticalDays: t.criticalDays, soonDays: t.soonDays };
+      renderAll();
+    } catch (e) {
+      // keep defaults if this fails — never block the app over a settings fetch
+    }
   }
 
   function renderStorePill() {
@@ -1172,12 +1219,14 @@
   function switchMgrTab(which) {
     document.getElementById('mgrTabWorkers').classList.toggle('active', which === 'workers');
     document.getElementById('mgrTabCategories').classList.toggle('active', which === 'categories');
+    document.getElementById('mgrTabAlerts').classList.toggle('active', which === 'alerts');
     document.getElementById('mgrTabReports').classList.toggle('active', which === 'reports');
     document.getElementById('mgrTabActivity').classList.toggle('active', which === 'activity');
     document.getElementById('mgrTabDigest').classList.toggle('active', which === 'digest');
     document.getElementById('mgrTabBilling').classList.toggle('active', which === 'billing');
     document.getElementById('mgrPaneWorkers').style.display = which === 'workers' ? 'block' : 'none';
     document.getElementById('mgrPaneCategories').style.display = which === 'categories' ? 'block' : 'none';
+    document.getElementById('mgrPaneAlerts').style.display = which === 'alerts' ? 'block' : 'none';
     document.getElementById('mgrPaneReports').style.display = which === 'reports' ? 'block' : 'none';
     document.getElementById('mgrPaneActivity').style.display = which === 'activity' ? 'block' : 'none';
     document.getElementById('mgrPaneDigest').style.display = which === 'digest' ? 'block' : 'none';
@@ -1185,15 +1234,59 @@
     if (which === 'activity') loadActivity();
     if (which === 'billing') loadBillingPane();
     if (which === 'categories') renderCategoryManagerList();
+    if (which === 'alerts') loadThresholdsPane();
     if (which === 'reports') loadShrinkReport();
     if (which === 'digest') loadDigestFrequency();
   }
   document.getElementById('mgrTabWorkers').addEventListener('click', () => switchMgrTab('workers'));
   document.getElementById('mgrTabCategories').addEventListener('click', () => switchMgrTab('categories'));
+  document.getElementById('mgrTabAlerts').addEventListener('click', () => switchMgrTab('alerts'));
   document.getElementById('mgrTabReports').addEventListener('click', () => switchMgrTab('reports'));
   document.getElementById('mgrTabActivity').addEventListener('click', () => switchMgrTab('activity'));
   document.getElementById('mgrTabDigest').addEventListener('click', () => switchMgrTab('digest'));
   document.getElementById('mgrTabBilling').addEventListener('click', () => switchMgrTab('billing'));
+
+  async function loadThresholdsPane() {
+    document.getElementById('criticalDaysInput').value = urgencyThresholds.criticalDays;
+    document.getElementById('soonDaysInput').value = urgencyThresholds.soonDays;
+    document.getElementById('alertsThresholdError').style.display = 'none';
+  }
+
+  document.getElementById('saveThresholdsBtn').addEventListener('click', async () => {
+    const errEl = document.getElementById('alertsThresholdError');
+    const criticalDays = Number(document.getElementById('criticalDaysInput').value);
+    const soonDays = Number(document.getElementById('soonDaysInput').value);
+    if (!Number.isFinite(criticalDays) || criticalDays < 0) {
+      errEl.textContent = 'Enter a valid critical threshold.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!Number.isFinite(soonDays) || soonDays <= criticalDays) {
+      errEl.textContent = 'The "Soon" threshold must be greater than the "Critical" one.';
+      errEl.style.display = 'block';
+      return;
+    }
+    const btn = document.getElementById('saveThresholdsBtn');
+    btn.disabled = true;
+    const originalText = btn.textContent;
+    btn.textContent = 'Saving\u2026';
+    try {
+      const result = await apiRequest('/api/org/urgency-thresholds', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ criticalDays, soonDays }),
+      });
+      urgencyThresholds = { criticalDays: result.criticalDays, soonDays: result.soonDays };
+      errEl.style.display = 'none';
+      showToast('Expiration labels updated');
+      renderAll();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    } finally {
+      btn.disabled = false;
+      btn.textContent = originalText;
+    }
+  });
 
   async function openWorkersModal() {
     switchMgrTab('workers');
@@ -1738,9 +1831,9 @@
   // BULK CSV IMPORT
   // =====================================================================
 
-  const IMPORT_TEMPLATE_CSV = 'Product Name,UPC,Category,Expiration Date,Quantity,Unit,Location,Size,Size Unit,Cost Price,Selling Price\r\n' +
-    'Organic Whole Milk 1gal,041220576428,Dairy,2026-09-15,12,each,Cooler 2,1,gal,2.50,4.99\r\n' +
-    'RedBull 12oz,611269003727,Drinks,2026-10-01,24,case,Cooler 5,12,oz,1.25,2.99\r\n';
+  const IMPORT_TEMPLATE_CSV = 'Product Name,UPC,Category,Expiration Date,Quantity,Unit,Location,Size,Size Unit,Cost Price,Selling Price,Date Purchased\r\n' +
+    'Organic Whole Milk 1gal,041220576428,Dairy,2026-09-15,12,each,Cooler 2,1,gal,2.50,4.99,2026-08-01\r\n' +
+    'RedBull 12oz,611269003727,Drinks,2026-10-01,24,case,Cooler 5,12,oz,1.25,2.99,2026-08-01\r\n';
 
   document.getElementById('downloadTemplateBtn').addEventListener('click', () => {
     const blob = new Blob([IMPORT_TEMPLATE_CSV], { type: 'text/csv' });
@@ -1836,11 +1929,12 @@
     const target = new Date(dateStr + 'T00:00:00');
     return Math.round((target - today) / 86400000);
   }
+  let urgencyThresholds = { criticalDays: 3, soonDays: 60 };
   function urgency(dateStr) {
     const d = daysUntil(dateStr);
     if (d < 0) return 'expired';
-    if (d <= 3) return 'critical';
-    if (d <= 14) return 'soon';
+    if (d <= urgencyThresholds.criticalDays) return 'critical';
+    if (d <= urgencyThresholds.soonDays) return 'soon';
     return 'ok';
   }
   const URGENCY_META = {
@@ -1955,6 +2049,14 @@
   function getLocations() {
     return Array.from(new Set(items.map(i => i.location).filter(Boolean))).sort();
   }
+  function todayDateStr() {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  }
+  function populateLocationDatalist() {
+    document.getElementById('knownLocationsList').innerHTML =
+      getLocations().map(l => `<option value="${esc(l)}"></option>`).join('');
+  }
   function categoryById(id) {
     return categories.find(c => c.id === id) || null;
   }
@@ -2061,6 +2163,7 @@
         ? `<span class="category-pill" style="background:${cat.color}22; color:${cat.color};"><span class="dot"></span>${esc(cat.name)}</span>`
         : '';
       const sizeLabel = it.sizeValue ? `<span class="tag-size">${esc(it.sizeValue)} ${esc(it.sizeUnit || '')}</span>` : '';
+      const upcLabel = it.upc && it.upc.startsWith('NOUPC-') ? 'No barcode' : it.upc;
       let priceLine = '';
       if (it.sellingPrice) {
         const marginPct = it.costPrice ? Math.round(((it.sellingPrice - it.costPrice) / it.sellingPrice) * 100) : null;
@@ -2077,7 +2180,7 @@
             </div>
             <span class="tag-status" style="background:${meta.tint};color:${meta.text};">${meta.label}</span>
           </div>
-          <div class="tag-upc">${esc(it.upc)} ${sizeLabel}</div>
+          <div class="tag-upc">${esc(upcLabel)} ${sizeLabel}</div>
           <div class="tag-loc">${locationPin()} ${esc(it.location)}</div>
           ${priceLine}
           <div class="tag-bottom">
@@ -2350,11 +2453,15 @@
     document.getElementById('modalTitle').textContent = item ? 'EDIT TAG' : 'NEW TAG';
     document.getElementById('submitBtn').textContent = item ? 'Save changes' : 'Add to floor';
     document.getElementById('editId').value = editingId || '';
-    document.getElementById('upcInput').value = item ? item.upc : '';
+    document.getElementById('upcInput').value = item ? (item.upc && item.upc.startsWith('NOUPC-') ? '' : item.upc) : '';
+    document.getElementById('noUpcCheckbox').checked = !!(item && item.upc && item.upc.startsWith('NOUPC-'));
+    applyNoUpcState();
     document.getElementById('nameInput').value = item ? item.name : '';
     resetBatchRows(item ? item.expirationDate : '', item ? item.quantity : '', !item);
     document.getElementById('unitInput').value = item ? item.unit : 'each';
     document.getElementById('locInput').value = item ? item.location : '';
+    populateLocationDatalist();
+    document.getElementById('datePurchasedInput').value = item ? (item.datePurchased || '') : todayDateStr();
     populateCategorySelect();
     document.getElementById('categoryInput').value = item && item.categoryId ? item.categoryId : '';
     document.getElementById('sizeValueInput').value = item && item.sizeValue !== null && item.sizeValue !== undefined ? item.sizeValue : '';
@@ -2392,7 +2499,8 @@
     e.preventDefault();
     if (isSubmitting) return;
 
-    const upc = document.getElementById('upcInput').value.trim();
+    const noUpc = document.getElementById('noUpcCheckbox').checked;
+    let upc = document.getElementById('upcInput').value.trim();
     const name = document.getElementById('nameInput').value.trim();
     const unit = document.getElementById('unitInput').value;
     const location = document.getElementById('locInput').value.trim();
@@ -2401,11 +2509,22 @@
     const sizeUnit = document.getElementById('sizeUnitInput').value || null;
     const costPriceRaw = document.getElementById('costPriceInput').value;
     const sellingPriceRaw = document.getElementById('sellingPriceInput').value;
+    const datePurchased = document.getElementById('datePurchasedInput').value || null;
     const batches = getBatchRows();
     const errEl = document.getElementById('formError');
 
+    if (noUpc) {
+      // Keep the existing placeholder if we're editing an item that already has one,
+      // otherwise generate a fresh unique one — this keeps UPC "required" everywhere
+      // else in the app (lookup, caching, exports) without special-casing it.
+      const editingItem = editingId ? items.find(i => i.id === editingId) : null;
+      upc = (editingItem && editingItem.upc && editingItem.upc.startsWith('NOUPC-'))
+        ? editingItem.upc
+        : `NOUPC-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
+    }
+
     let err = '';
-    if (!upc) err = 'UPC is required.';
+    if (!noUpc && !upc) err = 'UPC is required (or check \u201cNo barcode\u201d).';
     else if (!name) err = 'Product name is required.';
     else if (!location) err = 'Location is required.';
     else if (sizeValueRaw !== '' && Number(sizeValueRaw) < 0) err = 'Enter a valid size.';
@@ -2432,6 +2551,7 @@
       sizeUnit: sizeValueRaw === '' ? null : sizeUnit,
       costPrice: costPriceRaw === '' ? null : Number(costPriceRaw),
       sellingPrice: sellingPriceRaw === '' ? null : Number(sellingPriceRaw),
+      datePurchased,
     };
     const submitBtn = document.getElementById('submitBtn');
     const originalLabel = submitBtn.textContent;
@@ -2535,6 +2655,24 @@
       checkExistingBatches(val);
     }, 500);
   });
+
+  function applyNoUpcState() {
+    const checked = document.getElementById('noUpcCheckbox').checked;
+    const upcInput = document.getElementById('upcInput');
+    const scanBtn = document.getElementById('scanBtn');
+    upcInput.disabled = checked;
+    upcInput.placeholder = checked ? 'No barcode' : 'e.g. 041220576428';
+    scanBtn.disabled = checked;
+    scanBtn.style.opacity = checked ? '0.5' : '1';
+    scanBtn.style.pointerEvents = checked ? 'none' : 'auto';
+    if (checked) {
+      upcInput.value = '';
+      hideLookupNote();
+      hideBatchPanel();
+      if (scanning) stopScan();
+    }
+  }
+  document.getElementById('noUpcCheckbox').addEventListener('change', applyNoUpcState);
 
   // ---------- existing batch detection (avoid duplicate tags for the same UPC) ----------
   function hideBatchPanel() {
