@@ -2496,11 +2496,23 @@
     printShelfQrLabels(getLocations());
   });
 
-  function printShelfQrLabels(locations) {
+  async function printShelfQrLabels(locations) {
     if (!locations || locations.length === 0) {
       showToast('Nothing to print');
       return;
     }
+
+    // Generate every QR code as a finished image *before* opening the print
+    // window — so there's no cross-window rendering step at all, just plain
+    // <img> tags with already-complete image data baked into the HTML.
+    let dataUrls;
+    try {
+      dataUrls = await Promise.all(locations.map(loc => QRCode.toDataURL(shelfUrlFor(loc), { width: 240, margin: 1 })));
+    } catch (e) {
+      showToast('Couldn\u2019t generate QR codes');
+      return;
+    }
+
     const win = window.open('', '_blank');
     if (!win) {
       showToast('Pop-up blocked \u2014 allow pop-ups for this site to print labels');
@@ -2509,7 +2521,7 @@
 
     const labelsHtml = locations.map((loc, i) => `
       <div class="shelf-label">
-        <canvas id="qr-${i}"></canvas>
+        <img src="${dataUrls[i]}" alt="QR code for ${esc(loc)}">
         <div class="shelf-label-name">${esc(loc)}</div>
         <div class="shelf-label-sub">Scan for what's expiring here</div>
       </div>
@@ -2523,7 +2535,7 @@
   body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
   .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   .shelf-label { border: 1px dashed #999; border-radius: 6px; padding: 12px 8px; text-align: center; page-break-inside: avoid; }
-  .shelf-label canvas { width: 100%; height: auto; max-width: 140px; }
+  .shelf-label img { width: 100%; height: auto; max-width: 140px; }
   .shelf-label-name { font-size: 13px; font-weight: 700; margin-top: 6px; }
   .shelf-label-sub { font-size: 10px; color: #666; margin-top: 2px; }
   @media print { .shelf-label { border: 1px solid #ccc; } }
@@ -2534,30 +2546,7 @@
 </body>
 </html>`);
     win.document.close();
-
-    // Draw using the already-loaded QRCode from *this* window, targeting
-    // canvases in the popup's DOM — avoids relying on a script tag loading
-    // inside the popup, which Chrome can silently block or delay (the
-    // "document.write" intervention) for cross-origin scripts.
-    win.onload = () => {
-      let remaining = locations.length;
-      const triggerPrintWhenDone = () => {
-        remaining--;
-        if (remaining <= 0) setTimeout(() => win.print(), 150);
-      };
-      locations.forEach((loc, i) => {
-        const canvas = win.document.getElementById('qr-' + i);
-        try {
-          // toCanvas is asynchronous — printing before it resolves would
-          // capture a blank canvas, so wait for its callback before printing.
-          QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, () => {
-            triggerPrintWhenDone();
-          });
-        } catch (e) {
-          triggerPrintWhenDone(); // still let the rest print even if one code fails
-        }
-      });
-    };
+    win.onload = () => setTimeout(() => win.print(), 200);
   }
 
   // If the page was opened from a shelf QR label, filter straight to that
