@@ -2534,13 +2534,23 @@
     win.document.close();
 
     win.onload = () => {
+      let remaining = locations.length;
+      const triggerPrintWhenDone = () => {
+        remaining--;
+        if (remaining <= 0) setTimeout(() => win.print(), 150);
+      };
       locations.forEach((loc, i) => {
         const canvas = win.document.getElementById('qr-' + i);
         try {
-          win.QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 });
-        } catch (e) { /* leave that one label without a code if generation fails */ }
+          // toCanvas is asynchronous — printing before it resolves would
+          // capture a blank canvas, so wait for its callback before printing.
+          win.QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, () => {
+            triggerPrintWhenDone();
+          });
+        } catch (e) {
+          triggerPrintWhenDone(); // still let the rest print even if one code fails
+        }
       });
-      setTimeout(() => win.print(), 400);
     };
   }
 
@@ -2989,7 +2999,8 @@
   // A scanned code that's 6-8 digits is almost certainly compressed UPC-E —
   // expand it to standard UPC-A right at capture, so what actually gets
   // stored and printed later is always the full, unambiguous barcode.
-  function normalizeScannedUpc(raw) {
+  function normalizeScannedUpc(raw, isConfirmedUpcE) {
+    if (!isConfirmedUpcE) return raw; // don't guess-expand a numeric code from another symbology (e.g. an internal SKU in Code 39)
     const s = String(raw).replace(/\D/g, '');
     if (s.length === 6 || s.length === 7 || s.length === 8) {
       const expanded = expandUpcE(s);
@@ -3866,8 +3877,11 @@
     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
       ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
       ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
-      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.CODABAR,
     ]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
     zxingReader = new ZXing.BrowserMultiFormatReader(hints);
 
     // Ask for the camera directly (no device-listing step first) — on iOS Safari,
@@ -3877,7 +3891,8 @@
 
     zxingReader.decodeFromConstraints(constraints, video, (result, err) => {
       if (result && scanning) {
-        const upc = normalizeScannedUpc(result.getText());
+        const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
+        const upc = normalizeScannedUpc(result.getText(), isUpcE);
         document.getElementById('upcInput').value = upc;
         lookupUpc(upc);
         checkExistingBatches(upc);
@@ -4053,14 +4068,18 @@
     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
       ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
       ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
-      ZXing.BarcodeFormat.CODE_128,
+      ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.CODABAR,
     ]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
     bulkZxingReader = new ZXing.BrowserMultiFormatReader(hints);
     const constraints = { video: { facingMode: { ideal: 'environment' } } };
 
     bulkZxingReader.decodeFromConstraints(constraints, video, (result, err) => {
       if (result && bulkScanning) {
-        const upc = normalizeScannedUpc(result.getText());
+        const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
+        const upc = normalizeScannedUpc(result.getText(), isUpcE);
         const now = Date.now();
         // Debounce: ignore the same barcode if it's still in frame from the last scan
         if (upc === bulkLastScanUpc && (now - bulkLastScanTime) < 2500) return;
