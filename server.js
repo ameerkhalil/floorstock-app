@@ -1061,6 +1061,155 @@ app.get('/api/items/export.csv', requireAuth, requireActiveSubscription, (req, r
   res.send(csv);
 });
 
+// ---------- CSV import (bulk add for new stores with existing inventory) ----------
+
+function parseCsvText(text) {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i];
+    if (inQuotes) {
+      if (c === '"') {
+        if (text[i + 1] === '"') { field += '"'; i++; }
+        else inQuotes = false;
+      } else field += c;
+    } else {
+      if (c === '"') inQuotes = true;
+      else if (c === ',') { row.push(field); field = ''; }
+      else if (c === '\n') { row.push(field); rows.push(row); row = []; field = ''; }
+      else if (c === '\r') { /* ignore, \n handles the line break */ }
+      else field += c;
+    }
+  }
+  if (field.length > 0 || row.length > 0) { row.push(field); rows.push(row); }
+  return rows.filter(r => r.some(cell => cell.trim() !== ''));
+}
+
+function normalizeImportDate(raw) {
+  if (!raw) return null;
+  const s = String(raw).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/); // M/D/YYYY or MM/DD/YYYY
+  if (m) return `${m[3]}-${m[1].padStart(2, '0')}-${m[2].padStart(2, '0')}`;
+  return null;
+}
+
+const IMPORT_HEADER_ALIASES = {
+  name: ['productname', 'name', 'product', 'item', 'itemname'],
+  upc: ['upc', 'barcode', 'upcbarcode', 'sku'],
+  category: ['category'],
+  expirationDate: ['expirationdate', 'expiration', 'expdate', 'expires'],
+  quantity: ['quantity', 'qty'],
+  unit: ['unit'],
+  location: ['location', 'locationonfloor', 'shelf', 'aisle'],
+  sizeValue: ['size', 'sizevalue'],
+  sizeUnit: ['sizeunit'],
+  costPrice: ['costprice', 'cost'],
+  sellingPrice: ['sellingprice', 'price', 'sellprice', 'retailprice'],
+};
+
+function matchHeaderKey(headerCell) {
+  const normalized = headerCell.trim().toLowerCase().replace(/[^a-z0-9]/g, '');
+  for (const [key, aliases] of Object.entries(IMPORT_HEADER_ALIASES)) {
+    if (aliases.includes(normalized)) return key;
+  }
+  return null;
+}
+
+app.post('/api/items/import.csv', requireAuth, requireActiveSubscription, (req, res) => {
+  const csvText = req.body && req.body.csv;
+  if (!csvText || typeof csvText !== 'string') return res.status(400).json({ error: 'No CSV data received.' });
+
+  const rows = parseCsvText(csvText);
+  if (rows.length < 2) return res.status(400).json({ error: 'That file doesn\u2019t have any data rows.' });
+  if (rows.length > 5001) return res.status(400).json({ error: 'That\u2019s more than 5,000 rows \u2014 split it into smaller files and import separately.' });
+
+  const headerRow = rows[0];
+  const columnMap = {}; // key -> column index
+  headerRow.forEach((cell, i) => {
+    const key = matchHeaderKey(cell);
+    if (key && !(key in columnMap)) columnMap[key] = i;
+  });
+
+  const missing = ['name', 'upc', 'expirationDate', 'quantity', 'location'].filter(k => !(k in columnMap));
+  if (missing.length) {
+    return res.status(400).json({ error: `Missing required column(s): ${missing.join(', ')}. Check the CSV template for expected headers.` });
+  }
+
+  const categories = db.prepare('SELECT * FROM categories WHERE store_id = ?').all(req.auth.storeId);
+  const categoryByName = new Map(categories.map(c => [c.name.trim().toLowerCase(), c]));
+  const IMPORT_PALETTE = ['#2E6EFF', '#14C4B2', '#F5A623', '#C1443C', '#8A5CF6', '#3F8F5F'];
+  let paletteIdx = 0;
+
+  const insertItem = db.prepare(`
+    INSERT INTO items (id, store_id, upc, name, expiration_date, quantity, unit, location, date_added, category_id, size_value, size_unit, cost_price, selling_price)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertCategory = db.prepare('INSERT INTO categories (id, store_id, name, color, created_at) VALUES (?, ?, ?, ?, ?)');
+
+  let imported = 0;
+  const errors = [];
+  const dateAdded = nowIso();
+
+  const runImport = db.transaction(() => {
+    for (let r = 1; r < rows.length; r++) {
+      const cells = rows[r];
+      const get = (key) => (key in columnMap ? (cells[columnMap[key]] || '').trim() : '');
+
+      const name = get('name');
+      const upc = get('upc');
+      const expirationDate = normalizeImportDate(get('expirationDate'));
+      const quantityRaw = get('quantity');
+      const quantity = Number(quantityRaw);
+      const location = get('location');
+
+      if (!name || !upc || !expirationDate || !location || !Number.isFinite(quantity) || quantity < 0) {
+        errors.push({ row: r + 1, message: 'Missing or invalid required field(s).' });
+        continue;
+      }
+
+      let categoryId = null;
+      const categoryName = get('category');
+      if (categoryName) {
+        const key = categoryName.toLowerCase();
+        let cat = categoryByName.get(key);
+        if (!cat) {
+          const id = newId();
+          const color = IMPORT_PALETTE[paletteIdx % IMPORT_PALETTE.length];
+          paletteIdx++;
+          insertCategory.run(id, req.auth.storeId, categoryName, color, nowIso());
+          cat = { id, name: categoryName, color };
+          categoryByName.set(key, cat);
+        }
+        categoryId = cat.id;
+      }
+
+      const sizeValueRaw = get('sizeValue');
+      const sizeValue = sizeValueRaw ? Number(sizeValueRaw) : null;
+      const costPriceRaw = get('costPrice');
+      const costPrice = costPriceRaw ? Number(costPriceRaw.replace(/[$,]/g, '')) : null;
+      const sellingPriceRaw = get('sellingPrice');
+      const sellingPrice = sellingPriceRaw ? Number(sellingPriceRaw.replace(/[$,]/g, '')) : null;
+
+      insertItem.run(
+        newId(), req.auth.storeId, upc, name, expirationDate, quantity, get('unit') || 'each', location, dateAdded,
+        categoryId, Number.isFinite(sizeValue) ? sizeValue : null, get('sizeUnit') || null,
+        Number.isFinite(costPrice) ? costPrice : null, Number.isFinite(sellingPrice) ? sellingPrice : null
+      );
+      imported++;
+    }
+  });
+  runImport();
+
+  if (imported > 0) {
+    logAudit(req.auth.storeId, currentUsername(req), 'bulk_import', `Imported ${imported} item${imported !== 1 ? 's' : ''} from CSV${errors.length ? ` (${errors.length} row${errors.length !== 1 ? 's' : ''} skipped)` : ''}`);
+  }
+
+  res.json({ imported, skipped: errors.length, errors: errors.slice(0, 20) });
+});
+
 app.post('/api/items', requireAuth, requireActiveSubscription, (req, res) => {
   const error = validatePayload(req.body);
   if (error) return res.status(400).json({ error });
