@@ -599,6 +599,10 @@
             This item doesn&rsquo;t have a barcode
           </label>
           <video id="scanVideo" muted playsinline></video>
+          <button type="button" id="torchToggleBtn" style="display:none; margin-top:8px; background:var(--surface); border:none; border-radius:7px; padding:8px 12px; font-size:12.5px; font-weight:600; color:var(--muted-2); align-items:center; gap:6px;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6c0 4-4 5-4 9v2H10v-2c0-4-4-5-4-9a6 6 0 0 1 12 0Z"/><line x1="10" y1="22" x2="14" y2="22"/></svg>
+            <span id="torchToggleLabel">Turn on flashlight</span>
+          </button>
           <div class="scan-error" id="scanError" style="display:none;"></div>
           <div class="lookup-note" id="lookupNote"></div>
           <div id="existingBatches" style="display:none;"></div>
@@ -3832,6 +3836,9 @@
   let zxingReader = null;
   let scanning = false;
 
+  let currentCameraTrack = null;
+  let torchOn = false;
+
   function stopScan() {
     scanning = false;
     if (zxingReader) {
@@ -3845,6 +3852,9 @@
     }
     document.getElementById('scanBtn').classList.remove('active');
     document.getElementById('scanBtnLabel').textContent = 'Scan';
+    document.getElementById('torchToggleBtn').style.display = 'none';
+    currentCameraTrack = null;
+    torchOn = false;
   }
 
   async function startScan() {
@@ -3882,7 +3892,8 @@
     // Ask for the camera directly (no device-listing step first) — on iOS Safari,
     // any async step before getUserMedia can break the "this came from a tap"
     // chain and cause the permission request to be silently blocked.
-    const constraints = { video: { facingMode: { ideal: 'environment' } } };
+    const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
+    pollForCameraTrack();
 
     zxingReader.decodeFromConstraints(constraints, video, (result, err) => {
       if (result && scanning) {
@@ -3905,6 +3916,37 @@
       stopScan();
     });
   }
+
+  function pollForCameraTrack() {
+    const video = document.getElementById('scanVideo');
+    const checkInterval = setInterval(() => {
+      if (video.srcObject) {
+        clearInterval(checkInterval);
+        const track = video.srcObject.getVideoTracks()[0];
+        if (!track) return;
+        currentCameraTrack = track;
+        try {
+          const capabilities = track.getCapabilities ? track.getCapabilities() : {};
+          if (capabilities.torch) {
+            document.getElementById('torchToggleBtn').style.display = 'flex';
+          }
+        } catch (e) { /* torch capability isn't supported on this browser — just skip the button */ }
+      }
+    }, 200);
+    setTimeout(() => clearInterval(checkInterval), 6000); // give up quietly if the stream never attaches
+  }
+
+  document.getElementById('torchToggleBtn').addEventListener('click', async () => {
+    if (!currentCameraTrack) return;
+    const nextState = !torchOn;
+    try {
+      await currentCameraTrack.applyConstraints({ advanced: [{ torch: nextState }] });
+      torchOn = nextState;
+      document.getElementById('torchToggleLabel').textContent = torchOn ? 'Turn off flashlight' : 'Turn on flashlight';
+    } catch (e) {
+      showToast('Couldn\u2019t control the flashlight on this device');
+    }
+  });
 
   document.getElementById('scanBtn').addEventListener('click', () => { scanning ? stopScan() : startScan(); });
 
@@ -4069,7 +4111,7 @@
     ]);
     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
     bulkZxingReader = new ZXing.BrowserMultiFormatReader(hints);
-    const constraints = { video: { facingMode: { ideal: 'environment' } } };
+    const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
 
     bulkZxingReader.decodeFromConstraints(constraints, video, (result, err) => {
       if (result && bulkScanning) {
