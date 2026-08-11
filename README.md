@@ -50,9 +50,14 @@ database, and a browser frontend.
   set any percentage) and the selling price is suggested automatically, fully editable.
   When available, a scanned product also shows a "typically sells for $X–$Y" reference
   from market data.
-- **Shrink report** — pick a reason (Sold / Expired / Other) each time you remove a tag,
-  and Manage → Reports shows money lost to expiration vs. revenue and profit from items
-  sold before they expired, over a selectable time period.
+- **Quick-sell tracking** — the "Sell" button on any item card logs a real, timestamped
+  partial sale (e.g. "sold 3 of the 20 on hand") without removing the whole batch. This
+  is the actual sell-through signal behind the shrink report, and the foundation for any
+  future reorder-suggestion feature — see the note on POS integration below.
+- **Shrink report** — combines quick-sell events with full-batch removals (pick a reason
+  — Sold / Expired / Other — each time you remove a tag) into Manage → Reports: money
+  lost to expiration vs. revenue and profit from items sold in time, over a selectable
+  period.
 - **Automated weekly backup email** — every store's manager automatically gets a CSV
   snapshot of their inventory emailed weekly, as a portable copy of their data. This is
   *not* a substitute for real infrastructure-level backup of the whole database — see
@@ -66,6 +71,17 @@ database, and a browser frontend.
 
 If you had test items in the app before store accounts existed, they aren't associated
 with any store and won't show up. Sign up as a manager and re-add them.
+
+### On real sales data and POS integration
+
+Quick-sell tracking (the "Sell" button) is currently the only real sales signal —
+it depends on staff actually using it consistently, and it isn't automatic. For
+fully automatic sales data, the correct long-term path is integrating directly with
+whatever point-of-sale system a store already runs at checkout (e.g. Verifone's
+Commander/Horizon Partner Program for convenience/fuel retailers). That's a real
+business partnership process with the POS vendor, not something togglable via an
+environment variable — worth pursuing once quick-sell data shows the demand is there,
+but it's a separate, larger project from anything in this codebase today.
 
 ### Data safety: what the automated backup does and doesn't cover
 
@@ -256,6 +272,7 @@ on login/registration and required on the routes marked "auth".
 | GET    | `/api/items/export.csv`       | any      | Download the store's inventory as CSV      |
 | POST   | `/api/items`                  | any      | Create an item                             |
 | POST   | `/api/items/:id/add-quantity` | any      | Add units to an existing batch             |
+| POST   | `/api/items/:id/sell`         | any      | Log a partial sale; body `{ quantity }`    |
 | PUT    | `/api/items/:id`              | any      | Update an item                             |
 | DELETE | `/api/items/:id`              | any      | Delete an item; body `{ reason }` (sold/expired/other) |
 

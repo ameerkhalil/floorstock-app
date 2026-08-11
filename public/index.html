@@ -125,6 +125,7 @@
   .tag-actions button { flex: 1; display: flex; align-items: center; justify-content: center; gap: 5px; background: var(--surface); border: none; border-radius: 6px; padding: 7px 0; font-size: 12.5px; font-weight: 600; color: var(--muted-2); }
   .tag-actions .del-btn { flex: 0 0 auto; padding: 7px 10px; color: var(--expired-band); }
   .tag-actions .del-btn.confirm { background: var(--expired-band); color: #fff; }
+  .tag-actions .sell-btn { background: var(--ok-tint); color: var(--ok-text); }
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(28,37,48,0.55); display: none; align-items: center; justify-content: center; z-index: 250; padding: 16px; }
   .modal-overlay.open { display: flex; }
@@ -1313,7 +1314,7 @@
       emptyEl.style.display = 'none';
       const tiles = [
         { label: 'Lost to expiration', value: `$${r.lostCost.toFixed(2)}`, color: 'var(--expired-band)', sub: `${r.lostCount} item${r.lostCount !== 1 ? 's' : ''}` },
-        { label: 'Revenue from items sold', value: `$${r.savedRevenue.toFixed(2)}`, color: 'var(--ok-band)', sub: `${r.savedCount} item${r.savedCount !== 1 ? 's' : ''}` },
+        { label: 'Revenue from items sold', value: `$${r.savedRevenue.toFixed(2)}`, color: 'var(--ok-band)', sub: `${r.savedCount} sale${r.savedCount !== 1 ? 's' : ''}` },
         { label: 'Cost recovered by selling', value: `$${r.savedCost.toFixed(2)}`, color: 'var(--accent)', sub: 'vs. discarding' },
         { label: 'Profit from items sold', value: `$${(r.savedRevenue - r.savedCost).toFixed(2)}`, color: 'var(--ok-band)', sub: 'before expiring' },
       ];
@@ -1707,6 +1708,10 @@
             <div class="tag-qty">${esc(it.quantity)} <span class="unit">${esc(it.unit)}</span></div>
           </div>
           <div class="tag-actions">
+            <button type="button" class="sell-btn" data-id="${it.id}" data-unit="${esc(it.unit)}" data-max="${esc(it.quantity)}">
+              <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
+              Sell
+            </button>
             <button type="button" class="edit-btn" data-id="${it.id}">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
               Edit
@@ -1722,6 +1727,7 @@
 
     grid.querySelectorAll('.edit-btn').forEach(btn => btn.addEventListener('click', () => openModal(btn.dataset.id)));
     grid.querySelectorAll('.del-btn').forEach(btn => btn.addEventListener('click', () => handleDeleteClick(btn)));
+    grid.querySelectorAll('.sell-btn').forEach(btn => btn.addEventListener('click', () => handleQuickSell(btn)));
   }
 
   let pendingDeleteId = null;
@@ -1758,6 +1764,30 @@
   document.getElementById('removeReasonOverlay').addEventListener('click', (e) => {
     if (e.target.id === 'removeReasonOverlay') { document.getElementById('removeReasonOverlay').classList.remove('open'); pendingDeleteId = null; }
   });
+
+  async function handleQuickSell(btn) {
+    const id = btn.dataset.id;
+    const unit = btn.dataset.unit;
+    const max = btn.dataset.max;
+    const raw = prompt(`How many ${unit} were just sold? (${max} on hand)`, '1');
+    if (raw === null) return;
+    const quantity = Number(raw);
+    if (!Number.isFinite(quantity) || quantity <= 0) {
+      showToast('Enter a valid quantity');
+      return;
+    }
+    try {
+      const result = await apiRequest(`${API_BASE}/${id}/sell`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quantity }),
+      });
+      items = items.map(i => i.id === id ? result.item : i);
+      renderAll();
+      showToast(`Sold ${quantity} ${unit}`);
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t log that sale');
+    }
+  }
 
   function renderAll() {
     renderLocationOptions();

@@ -172,6 +172,22 @@ db.exec(`
     created_at TEXT NOT NULL,
     PRIMARY KEY (store_id, sent_date)
   );
+
+  -- Partial "sold N units" events, separate from a full batch removal — this
+  -- is what "quick sell" logs, and it's the beginning of real sell-through
+  -- data (as opposed to only knowing when a whole batch finally runs out).
+  CREATE TABLE IF NOT EXISTS sales (
+    id TEXT PRIMARY KEY,
+    store_id TEXT NOT NULL,
+    item_id TEXT,
+    item_name TEXT NOT NULL,
+    quantity REAL NOT NULL,
+    unit TEXT NOT NULL,
+    cost_price REAL,
+    selling_price REAL,
+    sold_by TEXT,
+    sold_at TEXT NOT NULL
+  );
 `);
 
 // ---------- migrations for older deployments ----------
@@ -1006,6 +1022,32 @@ app.post('/api/items/:id/add-quantity', requireAuth, requireActiveSubscription, 
   res.json(rowToItem(row));
 });
 
+// "Quick sell" — log a real, timestamped partial sale without removing the
+// whole batch. This is the actual sell-through signal the shrink report and
+// any future reorder-suggestion feature would be built on.
+app.post('/api/items/:id/sell', requireAuth, requireActiveSubscription, (req, res) => {
+  const existing = db.prepare('SELECT * FROM items WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!existing) return res.status(404).json({ error: 'Item not found.' });
+
+  const sellQty = Number(req.body && req.body.quantity);
+  if (!Number.isFinite(sellQty) || sellQty <= 0) return res.status(400).json({ error: 'Enter a valid quantity sold.' });
+  if (sellQty > existing.quantity) return res.status(400).json({ error: `Only ${existing.quantity} ${existing.unit} left \u2014 can\u2019t sell more than that.` });
+
+  const newQty = existing.quantity - sellQty;
+  db.prepare('UPDATE items SET quantity = ? WHERE id = ?').run(newQty, req.params.id);
+
+  db.prepare(`
+    INSERT INTO sales (id, store_id, item_id, item_name, quantity, unit, cost_price, selling_price, sold_by, sold_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    newId(), req.auth.storeId, existing.id, existing.name, sellQty, existing.unit,
+    existing.cost_price, existing.selling_price, currentUsername(req), nowIso()
+  );
+
+  const row = db.prepare('SELECT * FROM items WHERE id = ?').get(req.params.id);
+  res.json({ item: rowToItem(row), sold: sellQty });
+});
+
 app.put('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) => {
   const existing = db.prepare('SELECT * FROM items WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
   if (!existing) return res.status(404).json({ error: 'Item not found.' });
@@ -1060,12 +1102,13 @@ app.delete('/api/items/:id', requireAuth, requireActiveSubscription, (req, res) 
 app.get('/api/reports/shrink', requireManager, (req, res) => {
   const days = Number(req.query.days) || 30;
   const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
-  const rows = db.prepare('SELECT * FROM removals WHERE store_id = ? AND removed_at >= ? ORDER BY removed_at DESC').all(req.auth.storeId, since);
+  const removalRows = db.prepare('SELECT * FROM removals WHERE store_id = ? AND removed_at >= ? ORDER BY removed_at DESC').all(req.auth.storeId, since);
+  const saleRows = db.prepare('SELECT * FROM sales WHERE store_id = ? AND sold_at >= ? ORDER BY sold_at DESC').all(req.auth.storeId, since);
 
   let lostCost = 0, lostCount = 0;
   let savedRevenue = 0, savedCost = 0, savedCount = 0;
 
-  for (const r of rows) {
+  for (const r of removalRows) {
     const qty = r.quantity || 0;
     if (r.reason === 'expired' || (r.reason === 'other' && r.was_expired)) {
       lostCost += (r.cost_price || 0) * qty;
@@ -1076,6 +1119,12 @@ app.get('/api/reports/shrink', requireManager, (req, res) => {
       savedCount += 1;
     }
   }
+  for (const s of saleRows) {
+    const qty = s.quantity || 0;
+    savedRevenue += (s.selling_price || 0) * qty;
+    savedCost += (s.cost_price || 0) * qty;
+    savedCount += 1;
+  }
 
   res.json({
     days,
@@ -1084,7 +1133,7 @@ app.get('/api/reports/shrink', requireManager, (req, res) => {
     savedRevenue: Math.round(savedRevenue * 100) / 100,
     savedCost: Math.round(savedCost * 100) / 100,
     savedCount,
-    totalRemovals: rows.length,
+    totalRemovals: removalRows.length + saleRows.length,
   });
 });
 
