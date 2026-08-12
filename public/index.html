@@ -186,7 +186,7 @@
      scrollable regions, so a touch-scroll gesture can randomly land on
      whichever one it feels like, including scrolling the background
      instead of the modal, or stopping short of the modal's own bottom. */
-  body.modal-open { position: fixed; overflow: hidden; width: 100%; }
+  body.modal-open { position: fixed; overflow: hidden; width: 100%; height: 100%; left: 0; right: 0; }
   /* Printing (labels / shelf QR codes) renders into this in-page container
      rather than a popup window — window.open() doesn't work inside the
      native app's WKWebView, which has no concept of a second browser
@@ -2929,6 +2929,7 @@
   }
 
   document.getElementById('printLabelsBtn').addEventListener('click', () => {
+    if (isNativePrintUnsupported()) return;
     printLabels(getFiltered());
   });
 
@@ -2959,7 +2960,10 @@
         </div>
       `).join('');
       listEl.querySelectorAll('[data-print-shelf]').forEach(btn => {
-        btn.addEventListener('click', () => printShelfQrLabels([btn.dataset.printShelf]));
+        btn.addEventListener('click', () => {
+          if (isNativePrintUnsupported()) return;
+          printShelfQrLabels([btn.dataset.printShelf]);
+        });
       });
     }
     document.getElementById('shelfQrOverlay').classList.add('open');
@@ -2982,8 +2986,23 @@
     if (e.target.id === 'shelfQrOverlay') document.getElementById('shelfQrOverlay').classList.remove('open');
   });
   document.getElementById('printAllShelfQrBtn').addEventListener('click', () => {
+    if (isNativePrintUnsupported()) return;
     printShelfQrLabels(getLocations());
   });
+
+  // Printing (window.print()) is a real, well-documented iOS limitation —
+  // it does not work inside a native app's WKWebView, only in an actual
+  // Safari tab, regardless of anything this app's own JS does. Rather than
+  // let the button silently do nothing (confusing — looks broken with zero
+  // explanation), tell the person clearly what's going on and point them
+  // to the web version, which prints correctly.
+  function isNativePrintUnsupported() {
+    if (window.Capacitor && Capacitor.isNativePlatform()) {
+      showToast('Printing isn\u2019t supported in the app yet \u2014 open floorstock-app.com in Safari or on desktop to print.');
+      return true;
+    }
+    return false;
+  }
 
   function printShelfQrLabels(locations) {
     if (!locations || locations.length === 0) {

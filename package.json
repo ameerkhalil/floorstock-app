@@ -15,6 +15,11 @@
     "cookie-parser": "^1.4.6",
     "express": "^4.19.2",
     "express-rate-limit": "^7.4.1",
-    "stripe": "^17.3.1"
+    "stripe": "^17.3.1",
+    "@capacitor/core": "^8.0.0",
+    "@capacitor/cli": "^8.0.0",
+    "@capacitor/ios": "^8.0.0",
+    "@capacitor/app": "^8.1.1",
+    "@capacitor/haptics": "^8.0.2"
   }
 }
