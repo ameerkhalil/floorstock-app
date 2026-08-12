@@ -66,5 +66,7 @@
 	</array>
 	<key>UIViewControllerBasedStatusBarAppearance</key>
 	<true/>
+	<key>NSCameraUsageDescription</key>
+	<string>FloorStock uses your camera to scan product barcodes so you can add or look up inventory items quickly.</string>
 </dict>
 </plist>
