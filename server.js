@@ -161,6 +161,24 @@ db.exec(`
     PRIMARY KEY (store_id, sent_date)
   );
 
+  -- Shift handoff notes — free-text notes any signed-in person (manager or
+  -- worker) can leave for whoever opens the app next, optionally tagged to
+  -- a location ("cooler 2 running warm"). Not scoped to a specific shift
+  -- time window on purpose — a note stays visible and unresolved until
+  -- someone explicitly marks it handled, since shifts don't always line up
+  -- with clean time boundaries in a small store.
+  CREATE TABLE IF NOT EXISTS shift_notes (
+    id TEXT PRIMARY KEY,
+    store_id TEXT NOT NULL,
+    location TEXT,
+    note TEXT NOT NULL,
+    created_by TEXT,
+    created_at TEXT NOT NULL,
+    resolved INTEGER NOT NULL DEFAULT 0,
+    resolved_by TEXT,
+    resolved_at TEXT
+  );
+
   -- One row per device that has granted push permission. A person can be
   -- signed in on more than one device (phone + a shared tablet up front),
   -- so this is keyed by token, not by user.
@@ -905,6 +923,55 @@ app.delete('/api/tasks/:id', requireManager, (req, res) => {
   const task = db.prepare('SELECT * FROM tasks WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
   if (!task) return res.status(404).json({ error: 'Task not found.' });
   db.prepare('DELETE FROM tasks WHERE id = ?').run(task.id);
+  res.status(204).end();
+});
+
+// =====================================================================
+// SHIFT NOTES (handoff notes between shifts — any signed-in role)
+// =====================================================================
+
+function rowToShiftNote(row) {
+  return {
+    id: row.id,
+    location: row.location || null,
+    note: row.note,
+    createdBy: row.created_by || null,
+    createdAt: row.created_at,
+    resolved: !!row.resolved,
+    resolvedBy: row.resolved_by || null,
+    resolvedAt: row.resolved_at || null,
+  };
+}
+
+app.get('/api/shift-notes', requireAuth, requireActiveSubscription, (req, res) => {
+  const rows = db.prepare('SELECT * FROM shift_notes WHERE store_id = ? ORDER BY resolved ASC, created_at DESC').all(req.auth.storeId);
+  res.json(rows.map(rowToShiftNote));
+});
+
+app.post('/api/shift-notes', requireAuth, requireActiveSubscription, (req, res) => {
+  const { note, location } = req.body || {};
+  if (!note || !String(note).trim()) return res.status(400).json({ error: 'Enter a note.' });
+  const id = newId();
+  db.prepare(`
+    INSERT INTO shift_notes (id, store_id, location, note, created_by, created_at, resolved)
+    VALUES (?, ?, ?, ?, ?, ?, 0)
+  `).run(id, req.auth.storeId, location ? String(location).trim() : null, String(note).trim(), currentUsername(req), nowIso());
+  res.status(201).json(rowToShiftNote(db.prepare('SELECT * FROM shift_notes WHERE id = ?').get(id)));
+});
+
+app.put('/api/shift-notes/:id/resolve', requireAuth, requireActiveSubscription, (req, res) => {
+  const existing = db.prepare('SELECT * FROM shift_notes WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!existing) return res.status(404).json({ error: 'Note not found.' });
+  const nowResolved = existing.resolved ? 0 : 1;
+  db.prepare('UPDATE shift_notes SET resolved = ?, resolved_by = ?, resolved_at = ? WHERE id = ?')
+    .run(nowResolved, nowResolved ? currentUsername(req) : null, nowResolved ? nowIso() : null, req.params.id);
+  res.json(rowToShiftNote(db.prepare('SELECT * FROM shift_notes WHERE id = ?').get(req.params.id)));
+});
+
+app.delete('/api/shift-notes/:id', requireAuth, requireActiveSubscription, (req, res) => {
+  const existing = db.prepare('SELECT * FROM shift_notes WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!existing) return res.status(404).json({ error: 'Note not found.' });
+  db.prepare('DELETE FROM shift_notes WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 
@@ -2145,6 +2212,78 @@ app.get('/api/org/dashboard', requireManager, (req, res) => {
     },
     locations,
   });
+});
+
+// Store-to-store transfer suggestions: an item expiring soon at one
+// location, where a sibling location in the same org has little or none of
+// that same product on hand, is worth physically moving rather than losing
+// entirely at one store while the other reorders more of it. This only
+// matches on UPC (exact product identity) — matching by name would risk
+// false matches between similarly-named but different products.
+//
+// This is informational only, not an executed transfer: it doesn't move
+// any inventory records between stores. Actually relocating stock still
+// happens outside the app (a phone call, a driver) — this just tells you
+// where it's worth doing that.
+app.get('/api/org/transfer-suggestions', requireManager, (req, res) => {
+  const stores = db.prepare('SELECT * FROM stores WHERE organization_id = ? ORDER BY created_at ASC').all(req.auth.organizationId);
+  if (stores.length < 2) return res.json({ suggestions: [] }); // nothing to transfer between with a single location
+
+  const org = db.prepare('SELECT critical_days, soon_days FROM organizations WHERE id = ?').get(req.auth.organizationId);
+  const criticalDays = org ? org.critical_days : 3;
+  const soonDays = org ? org.soon_days : 60;
+
+  // storeId -> upc -> { totalQuantity, name, soonestExpiration, costPrice }
+  const byStoreUpc = new Map();
+  for (const store of stores) {
+    const items = db.prepare("SELECT * FROM items WHERE store_id = ? AND upc IS NOT NULL AND upc != ''").all(store.id);
+    const upcMap = new Map();
+    for (const it of items) {
+      if (!upcMap.has(it.upc)) {
+        upcMap.set(it.upc, { totalQuantity: 0, name: it.name, soonestExpiration: it.expiration_date, costPrice: it.cost_price });
+      }
+      const bucket = upcMap.get(it.upc);
+      bucket.totalQuantity += it.quantity || 0;
+      if (it.expiration_date < bucket.soonestExpiration) bucket.soonestExpiration = it.expiration_date;
+    }
+    byStoreUpc.set(store.id, upcMap);
+  }
+
+  const LOW_STOCK_THRESHOLD = 2; // a sibling store at or below this many units is worth topping up
+  const suggestions = [];
+  for (const fromStore of stores) {
+    const fromMap = byStoreUpc.get(fromStore.id);
+    for (const [upc, info] of fromMap.entries()) {
+      const urgency = urgencyOf(info.soonestExpiration, criticalDays, soonDays);
+      if (urgency !== 'critical' && urgency !== 'soon') continue;
+      if (info.totalQuantity <= 0) continue;
+
+      // Find the sibling store that needs this product most (lowest stock).
+      let bestTo = null;
+      for (const toStore of stores) {
+        if (toStore.id === fromStore.id) continue;
+        const toInfo = byStoreUpc.get(toStore.id).get(upc);
+        const toQuantity = toInfo ? toInfo.totalQuantity : 0;
+        if (!bestTo || toQuantity < bestTo.toQuantity) bestTo = { store: toStore, toQuantity };
+      }
+      if (!bestTo || bestTo.toQuantity > LOW_STOCK_THRESHOLD) continue;
+
+      suggestions.push({
+        upc,
+        productName: info.name,
+        fromStore: { id: fromStore.id, name: fromStore.name },
+        toStore: { id: bestTo.store.id, name: bestTo.store.name },
+        fromQuantity: info.totalQuantity,
+        toQuantity: bestTo.toQuantity,
+        expirationDate: info.soonestExpiration,
+        urgency,
+        value: Math.round((info.costPrice || 0) * info.totalQuantity * 100) / 100,
+      });
+    }
+  }
+
+  suggestions.sort((a, b) => a.expirationDate.localeCompare(b.expirationDate));
+  res.json({ suggestions: suggestions.slice(0, 20) });
 });
 
 // =====================================================================

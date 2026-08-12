@@ -583,6 +583,17 @@
         </div>
       </div>
 
+      <div id="shiftNotesSection" style="background:#fff; border:1px solid var(--soon-band); border-radius:12px; padding:16px 20px; margin-bottom:18px;">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2px;">
+          <div style="font-family:'Oswald', sans-serif; font-size:14px; font-weight:600; letter-spacing:0.4px; color:var(--soon-text); display:flex; align-items:center; gap:7px;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+            SHIFT NOTES
+          </div>
+          <button type="button" id="addShiftNoteBtn" style="background:none; border:none; color:var(--accent); font-weight:600; font-size:12.5px; padding:4px 0;">+ Add note</button>
+        </div>
+        <div id="shiftNotesList" style="margin-top:10px;"></div>
+      </div>
+
       <div id="rescueSection" style="display:none; background:#fff; border:1px solid var(--critical-band); border-radius:12px; padding:18px 20px; margin-bottom:18px;">
         <button type="button" id="rescueToggle" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; width:100%; background:none; border:none; padding:0; cursor:pointer; text-align:left;">
           <div style="font-family:'Oswald', sans-serif; font-size:14px; font-weight:600; letter-spacing:0.4px; color:var(--critical-text); display:flex; align-items:center; gap:7px;">
@@ -867,6 +878,13 @@
 
         <div class="section-label">By location</div>
         <div id="orgDashboardLocations" style="display:flex; flex-direction:column; gap:8px;"></div>
+
+        <div class="section-label">Worth transferring between locations</div>
+        <p style="font-size:12.5px; color:var(--muted); line-height:1.5; margin-top:0; margin-bottom:10px;">
+          Expiring soon at one location, low or out at another — informational only, nothing here moves inventory automatically.
+        </p>
+        <div id="transferSuggestionsList"></div>
+        <div id="transferSuggestionsEmpty" style="font-size:13px; color:var(--muted); display:none;">Nothing worth transferring right now.</div>
       </div>
     </div>
   </div>
@@ -1020,6 +1038,32 @@
         <p style="font-size:13.5px; color:var(--muted-2); line-height:1.6; margin:0;">
           This is on our roadmap — reach out if you'd like to be notified when it's ready.
         </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- add shift note -->
+  <div class="modal-overlay" id="shiftNoteOverlay">
+    <div class="modal" style="max-width:400px;">
+      <div class="modal-header">
+        <div class="modal-title">ADD SHIFT NOTE</div>
+        <button class="modal-close" id="shiftNoteCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <div class="auth-error" id="shiftNoteError" style="display:none;"></div>
+        <form id="shiftNoteForm">
+          <div class="auth-field">
+            <label>Note</label>
+            <textarea class="field-input" id="shiftNoteText" rows="3" placeholder="e.g. Cooler 2 running warm, called for service"></textarea>
+          </div>
+          <div class="auth-field">
+            <label>Location (optional)</label>
+            <input class="field-input" id="shiftNoteLocation" placeholder="e.g. Aisle 4, Cooler 2" list="knownLocationsList" autocomplete="off">
+          </div>
+          <button type="submit" class="submit-btn">Add note</button>
+        </form>
       </div>
     </div>
   </div>
@@ -1786,6 +1830,28 @@
           await switchLocation(btn.dataset.switchStoreId);
         });
       });
+
+      const transferList = document.getElementById('transferSuggestionsList');
+      const transferEmpty = document.getElementById('transferSuggestionsEmpty');
+      const t = await apiRequest('/api/org/transfer-suggestions');
+      if (t.suggestions.length === 0) {
+        transferList.innerHTML = '';
+        transferEmpty.style.display = 'block';
+      } else {
+        transferEmpty.style.display = 'none';
+        transferList.innerHTML = t.suggestions.map(s => {
+          const urgencyColor = s.urgency === 'critical' ? 'var(--critical-text)' : 'var(--soon-text)';
+          return `
+          <div style="padding:10px 0; border-bottom:1px solid var(--card-border);">
+            <div style="font-weight:600; font-size:13.5px; margin-bottom:3px;">${esc(s.productName)}</div>
+            <div style="font-size:12.5px; color:var(--muted-2); line-height:1.5;">
+              <span style="color:${urgencyColor}; font-weight:600;">${s.fromQuantity} on hand</span> at ${esc(s.fromStore.name)}, expiring ${esc(formatDate(s.expirationDate))}
+              <br>${esc(s.toStore.name)} has ${s.toQuantity === 0 ? 'none' : 'only ' + s.toQuantity} \u2014 worth moving some over ($${s.value.toFixed(2)} at risk)
+            </div>
+          </div>
+        `;
+        }).join('');
+      }
     } catch (e) {
       showToast(e.message || 'Couldn\u2019t load the dashboard');
     }
@@ -3692,6 +3758,111 @@
     renderRescueSection();
   }
 
+  // ---------- shift notes ----------
+  let shiftNotes = [];
+
+  async function loadShiftNotes() {
+    try {
+      shiftNotes = await apiRequest('/api/shift-notes');
+      renderShiftNotes();
+    } catch (e) {
+      // Non-critical to the rest of the app loading — fail quietly.
+    }
+  }
+
+  function timeAgo(isoStr) {
+    const diffMs = Date.now() - new Date(isoStr).getTime();
+    const mins = Math.round(diffMs / 60000);
+    if (mins < 1) return 'just now';
+    if (mins < 60) return `${mins}m ago`;
+    const hours = Math.round(mins / 60);
+    if (hours < 24) return `${hours}h ago`;
+    return `${Math.round(hours / 24)}d ago`;
+  }
+
+  function renderShiftNotes() {
+    const listEl = document.getElementById('shiftNotesList');
+    const open = shiftNotes.filter(n => !n.resolved);
+    if (open.length === 0) {
+      listEl.innerHTML = `<div style="font-size:12.5px; color:var(--muted); padding-top:6px;">No open notes \u2014 all clear.</div>`;
+      return;
+    }
+    listEl.innerHTML = open.map(n => `
+      <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:10px; padding:8px 0; border-top:1px solid var(--card-border);">
+        <div style="flex:1;">
+          <div style="font-size:13.5px; line-height:1.4;">${esc(n.note)}</div>
+          <div style="font-size:11.5px; color:var(--muted); margin-top:2px;">
+            ${n.location ? esc(n.location) + ' \u00b7 ' : ''}${n.createdBy ? esc(n.createdBy) + ' \u00b7 ' : ''}${timeAgo(n.createdAt)}
+          </div>
+        </div>
+        <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button type="button" class="worker-remove" style="background:var(--ok-tint); color:var(--ok-text);" data-resolve-note="${n.id}" title="Mark handled">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          </button>
+          <button type="button" class="worker-remove" data-delete-note="${n.id}" title="Delete">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    listEl.querySelectorAll('[data-resolve-note]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          await apiRequest(`/api/shift-notes/${btn.dataset.resolveNote}/resolve`, { method: 'PUT' });
+          showToast('Marked handled');
+          loadShiftNotes();
+        } catch (e) { showToast(e.message); }
+      });
+    });
+    listEl.querySelectorAll('[data-delete-note]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Delete this note?')) return;
+        try {
+          await apiRequest(`/api/shift-notes/${btn.dataset.deleteNote}`, { method: 'DELETE' });
+          showToast('Note deleted');
+          loadShiftNotes();
+        } catch (e) { showToast(e.message); }
+      });
+    });
+  }
+
+  document.getElementById('addShiftNoteBtn').addEventListener('click', () => {
+    document.getElementById('shiftNoteText').value = '';
+    document.getElementById('shiftNoteLocation').value = '';
+    document.getElementById('shiftNoteError').style.display = 'none';
+    document.getElementById('shiftNoteOverlay').classList.add('open');
+  });
+  document.getElementById('shiftNoteCloseBtn').addEventListener('click', () => {
+    document.getElementById('shiftNoteOverlay').classList.remove('open');
+  });
+  document.getElementById('shiftNoteOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'shiftNoteOverlay') document.getElementById('shiftNoteOverlay').classList.remove('open');
+  });
+  document.getElementById('shiftNoteForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('shiftNoteError');
+    const note = document.getElementById('shiftNoteText').value.trim();
+    const location = document.getElementById('shiftNoteLocation').value.trim();
+    if (!note) {
+      errEl.textContent = 'Enter a note before adding it.';
+      errEl.style.display = 'block';
+      return;
+    }
+    try {
+      await apiRequest('/api/shift-notes', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ note, location: location || null }),
+      });
+      document.getElementById('shiftNoteOverlay').classList.remove('open');
+      showToast('Note added');
+      loadShiftNotes();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    }
+  });
+
   // ---------- inventory rescue ----------
   // Collapsed by default — persisted per-device so it doesn't reset every
   // visit once the person picks a preference.
@@ -4732,6 +4903,7 @@
   async function loadStoreData() {
     await Promise.all([loadItems(), loadCategories()]);
     renderAll();
+    loadShiftNotes();
   }
 
   // ---------- haptic feedback ----------
