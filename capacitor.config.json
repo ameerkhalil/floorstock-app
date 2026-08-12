@@ -1,0 +1,12 @@
+{
+  "appId": "com.paloshillsfoodandfuel.floorstock",
+  "appName": "FloorStock",
+  "webDir": "public",
+  "server": {
+    "url": "https://floorstock-app.com",
+    "cleartext": false
+  },
+  "ios": {
+    "contentInset": "automatic"
+  }
+}

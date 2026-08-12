@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
 <title>FloorStock — Inventory &amp; Expiration Tracking</title>
 <link rel="manifest" href="/manifest.json">
 <meta name="theme-color" content="#1C2530">
@@ -13,10 +13,9 @@
 <meta name="apple-mobile-web-app-title" content="FloorStock">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library/umd/index.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/browser/umd/zxing-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"></script>
 <style>
   :root {
     --bg: #EDEFF1;
@@ -36,8 +35,8 @@
     --soon-band: #C9A227; --soon-tint: #FBF6DF; --soon-text: #7A6118;
     --ok-band: #3F8F5F; --ok-tint: #E9F5EE; --ok-text: #276B41;
   }
-  * { box-sizing: border-box; }
-  html, body { margin: 0; padding: 0; }
+  * { box-sizing: border-box; min-width: 0; }
+  html, body { margin: 0; padding: 0; max-width: 100vw; overflow-x: hidden; }
   body { background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; min-height: 100vh; }
   button { font-family: inherit; cursor: pointer; }
   input, select { font-family: inherit; }
@@ -74,7 +73,7 @@
   .role-note { display: flex; gap: 8px; align-items: flex-start; background: var(--surface); border-radius: 8px; padding: 10px 12px; font-size: 12.5px; color: var(--muted-2); margin-bottom: 16px; line-height: 1.5; }
 
   /* ---------- app shell ---------- */
-  header { background: var(--ink); color: var(--bg); padding: 18px 20px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
+  header { background: var(--ink); color: var(--bg); padding: calc(18px + env(safe-area-inset-top)) 20px 18px; position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 8px rgba(0,0,0,0.15); }
   .header-inner { max-width: 1100px; margin: 0 auto; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
   .brand { display: flex; align-items: center; gap: 10px; }
   .brand-icon { width: 34px; height: 34px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden; }
@@ -599,16 +598,7 @@
             <input type="checkbox" id="noUpcCheckbox" style="width:15px; height:15px; margin:0;">
             This item doesn&rsquo;t have a barcode
           </label>
-          <div style="position:relative;">
-            <video id="scanVideo" muted playsinline></video>
-            <div id="scanTargetBox" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:80%; height:32%; border:2px solid #fff; border-radius:6px; box-shadow:0 0 0 999px rgba(0,0,0,0.35); pointer-events:none;">
-              <div style="position:absolute; bottom:-24px; left:0; right:0; text-align:center; color:#fff; font-size:11px; font-weight:600; text-shadow:0 1px 3px rgba(0,0,0,0.6);">Align barcode inside the box</div>
-            </div>
-          </div>
-          <button type="button" id="torchToggleBtn" style="display:none; margin-top:8px; background:var(--surface); border:none; border-radius:7px; padding:8px 12px; font-size:12.5px; font-weight:600; color:var(--muted-2); align-items:center; gap:6px;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6c0 4-4 5-4 9v2H10v-2c0-4-4-5-4-9a6 6 0 0 1 12 0Z"/><line x1="10" y1="22" x2="14" y2="22"/></svg>
-            <span id="torchToggleLabel">Turn on flashlight</span>
-          </button>
+          <video id="scanVideo" muted playsinline></video>
           <div class="scan-error" id="scanError" style="display:none;"></div>
           <div class="lookup-note" id="lookupNote"></div>
           <div id="existingBatches" style="display:none;"></div>
@@ -735,12 +725,7 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
           <span id="bulkScanToggleLabel">Start scanning</span>
         </button>
-        <div style="position:relative;">
-          <video id="bulkScanVideo" muted playsinline></video>
-          <div id="bulkScanTargetBox" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:80%; height:32%; border:2px solid #fff; border-radius:6px; box-shadow:0 0 0 999px rgba(0,0,0,0.35); pointer-events:none;">
-            <div style="position:absolute; bottom:-24px; left:0; right:0; text-align:center; color:#fff; font-size:11px; font-weight:600; text-shadow:0 1px 3px rgba(0,0,0,0.6);">Align barcode inside the box</div>
-          </div>
-        </div>
+        <video id="bulkScanVideo" muted playsinline></video>
         <div class="scan-error" id="bulkScanError" style="display:none;"></div>
         <div class="upc-row" style="margin-top:10px;">
           <input class="field-input mono" id="bulkScanManualInput" placeholder="Or type a UPC and press Enter">
@@ -2429,6 +2414,7 @@
 <html>
 <head>
 <title>FloorStock Labels</title>
+<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
 <style>
   body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
   .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
@@ -2445,18 +2431,14 @@
 </html>`);
     win.document.close();
 
-    // Draw using the already-loaded JsBarcode from *this* window, targeting
-    // elements in the popup's DOM — avoids relying on a script tag loading
-    // inside the popup, which Chrome can silently block or delay (the
-    // "document.write" intervention) for cross-origin scripts.
     win.onload = () => {
       itemsToLabel.forEach((it, i) => {
         const el = win.document.getElementById('barcode-' + i);
         try {
-          JsBarcode(el, it.upc, { format: barcodeFormatFor(it.upc), displayValue: true, fontSize: 12, height: 40, margin: 4 });
+          win.JsBarcode(el, it.upc, { format: barcodeFormatFor(it.upc), displayValue: true, fontSize: 12, height: 40, margin: 4 });
         } catch (e) {
           try {
-            JsBarcode(el, it.upc, { format: 'CODE128', displayValue: true, fontSize: 12, height: 40, margin: 4 });
+            win.JsBarcode(el, it.upc, { format: 'CODE128', displayValue: true, fontSize: 12, height: 40, margin: 4 });
           } catch (e2) { /* if even CODE128 fails on this value, leave the label without a barcode graphic */ }
         }
       });
@@ -2511,23 +2493,11 @@
     printShelfQrLabels(getLocations());
   });
 
-  async function printShelfQrLabels(locations) {
+  function printShelfQrLabels(locations) {
     if (!locations || locations.length === 0) {
       showToast('Nothing to print');
       return;
     }
-
-    // Generate every QR code as a finished image *before* opening the print
-    // window — so there's no cross-window rendering step at all, just plain
-    // <img> tags with already-complete image data baked into the HTML.
-    let dataUrls;
-    try {
-      dataUrls = await Promise.all(locations.map(loc => QRCode.toDataURL(shelfUrlFor(loc), { width: 240, margin: 1 })));
-    } catch (e) {
-      showToast('Couldn\u2019t generate QR codes');
-      return;
-    }
-
     const win = window.open('', '_blank');
     if (!win) {
       showToast('Pop-up blocked \u2014 allow pop-ups for this site to print labels');
@@ -2536,7 +2506,7 @@
 
     const labelsHtml = locations.map((loc, i) => `
       <div class="shelf-label">
-        <img src="${dataUrls[i]}" alt="QR code for ${esc(loc)}">
+        <canvas id="qr-${i}"></canvas>
         <div class="shelf-label-name">${esc(loc)}</div>
         <div class="shelf-label-sub">Scan for what's expiring here</div>
       </div>
@@ -2546,11 +2516,12 @@
 <html>
 <head>
 <title>FloorStock Shelf QR Labels</title>
+<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\/script>
 <style>
   body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
   .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
   .shelf-label { border: 1px dashed #999; border-radius: 6px; padding: 12px 8px; text-align: center; page-break-inside: avoid; }
-  .shelf-label img { width: 100%; height: auto; max-width: 140px; }
+  .shelf-label canvas { width: 100%; height: auto; max-width: 140px; }
   .shelf-label-name { font-size: 13px; font-weight: 700; margin-top: 6px; }
   .shelf-label-sub { font-size: 10px; color: #666; margin-top: 2px; }
   @media print { .shelf-label { border: 1px solid #ccc; } }
@@ -2561,7 +2532,26 @@
 </body>
 </html>`);
     win.document.close();
-    win.onload = () => setTimeout(() => win.print(), 200);
+
+    win.onload = () => {
+      let remaining = locations.length;
+      const triggerPrintWhenDone = () => {
+        remaining--;
+        if (remaining <= 0) setTimeout(() => win.print(), 150);
+      };
+      locations.forEach((loc, i) => {
+        const canvas = win.document.getElementById('qr-' + i);
+        try {
+          // toCanvas is asynchronous — printing before it resolves would
+          // capture a blank canvas, so wait for its callback before printing.
+          win.QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, () => {
+            triggerPrintWhenDone();
+          });
+        } catch (e) {
+          triggerPrintWhenDone(); // still let the rest print even if one code fails
+        }
+      });
+    };
   }
 
   // If the page was opened from a shelf QR label, filter straight to that
@@ -3847,12 +3837,8 @@
   let zxingReader = null;
   let scanning = false;
 
-  let currentCameraTrack = null;
-  let torchOn = false;
-
   function stopScan() {
     scanning = false;
-    if (scanLoopTimer) { clearTimeout(scanLoopTimer); scanLoopTimer = null; }
     if (zxingReader) {
       try { zxingReader.reset(); } catch (e) {}
     }
@@ -3864,19 +3850,13 @@
     }
     document.getElementById('scanBtn').classList.remove('active');
     document.getElementById('scanBtnLabel').textContent = 'Scan';
-    document.getElementById('torchToggleBtn').style.display = 'none';
-    document.getElementById('scanTargetBox').style.display = 'none';
-    currentCameraTrack = null;
-    torchOn = false;
   }
-
-  let scanLoopTimer = null;
 
   async function startScan() {
     const errEl = document.getElementById('scanError');
     errEl.style.display = 'none';
 
-    if (typeof ZXing === 'undefined' || typeof ZXingBrowser === 'undefined') {
+    if (typeof ZXing === 'undefined') {
       errEl.textContent = 'Scanner failed to load \u2014 check your connection, or enter the UPC manually below.';
       errEl.style.display = 'block';
       return;
@@ -3892,7 +3872,6 @@
     scanning = true;
     document.getElementById('scanBtn').classList.add('active');
     document.getElementById('scanBtnLabel').textContent = 'Stop';
-    document.getElementById('scanTargetBox').style.display = 'block';
 
     const hints = new Map();
     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
@@ -3903,121 +3882,34 @@
       ZXing.BarcodeFormat.CODABAR,
     ]);
     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-    zxingReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
+    zxingReader = new ZXing.BrowserMultiFormatReader(hints);
 
     // Ask for the camera directly (no device-listing step first) — on iOS Safari,
     // any async step before getUserMedia can break the "this came from a tap"
     // chain and cause the permission request to be silently blocked.
-    const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
+    const constraints = { video: { facingMode: { ideal: 'environment' } } };
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      if (!scanning) { stream.getTracks().forEach(t => t.stop()); return; } // stopped while awaiting permission
-      video.srcObject = stream;
-      await video.play();
-      pollForCameraTrack();
-      runCroppedScanLoop(video, zxingReader, () => scanning, (upc) => {
+    zxingReader.decodeFromConstraints(constraints, video, (result, err) => {
+      if (result && scanning) {
+        const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
+        const upc = normalizeScannedUpc(result.getText(), isUpcE);
         document.getElementById('upcInput').value = upc;
         lookupUpc(upc);
         checkExistingBatches(upc);
         stopScan();
-      }, (t) => { scanLoopTimer = t; });
-    } catch (e) {
+      }
+    }).catch((e) => {
       let msg = 'Camera access was blocked or unavailable \u2014 enter the UPC manually below.';
       if (e && e.name === 'NotAllowedError') {
         msg = 'Camera permission was denied. On iPhone: Settings \u2192 Safari \u2192 Camera \u2192 Allow, or tap the \u201cAa\u201d icon in the address bar \u2192 Website Settings \u2192 Camera \u2192 Allow, then try again.';
       } else if (e && e.name === 'NotFoundError') {
         msg = 'No camera found on this device \u2014 enter the UPC manually below.';
-      } else if (e) {
-        msg = `Scanner error (${e.name || 'unknown'}): ${e.message || String(e)} \u2014 enter the UPC manually below.`;
       }
       errEl.textContent = msg;
       errEl.style.display = 'block';
       stopScan();
-    }
-  }
-
-  // Scans only a cropped center strip of each video frame instead of the
-  // whole frame. This gives small/dense barcodes (gum, candy, narrow
-  // packaging) effectively more resolution to work with, since the same
-  // camera pixels are concentrated on a smaller area instead of spread
-  // across the full frame. Shared by both the single-item and bulk
-  // scanners — the caller decides (via isActiveFn) whether to keep going
-  // after a successful decode.
-  function runCroppedScanLoop(video, reader, isActiveFn, onSuccess, setTimerFn) {
-    if (!isActiveFn()) return;
-    if (!video.videoWidth) {
-      setTimerFn(setTimeout(() => runCroppedScanLoop(video, reader, isActiveFn, onSuccess, setTimerFn), 100));
-      return;
-    }
-    const vw = video.videoWidth, vh = video.videoHeight;
-    const cropW = vw * 0.8, cropH = vh * 0.32;
-    const cropX = (vw - cropW) / 2, cropY = (vh - cropH) / 2;
-    const canvas = document.createElement('canvas');
-    canvas.width = cropW;
-    canvas.height = cropH;
-    canvas.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
-
-    const scheduleNext = () => {
-      if (isActiveFn()) setTimerFn(setTimeout(() => runCroppedScanLoop(video, reader, isActiveFn, onSuccess, setTimerFn), 120));
-    };
-
-    // decodeFromCanvas normally returns a rejected promise when nothing is
-    // found in a frame, but can also throw synchronously on some calls —
-    // catch both the same way, since "nothing found this frame" is the
-    // expected, constant, non-fatal outcome while actively scanning.
-    let decodePromise;
-    try {
-      decodePromise = reader.decodeFromCanvas(canvas);
-    } catch (syncErr) {
-      scheduleNext();
-      return;
-    }
-
-    Promise.resolve(decodePromise).then(result => {
-      if (result && isActiveFn()) {
-        const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
-        const upc = normalizeScannedUpc(result.getText(), isUpcE);
-        onSuccess(upc);
-        scheduleNext(); // for bulk scanning, isActiveFn() is still true afterward, so this keeps the loop going
-      } else {
-        scheduleNext();
-      }
-    }).catch(() => {
-      scheduleNext(); // nothing found in this frame — completely normal, just try the next one
     });
   }
-
-  function pollForCameraTrack() {
-    const video = document.getElementById('scanVideo');
-    const checkInterval = setInterval(() => {
-      if (video.srcObject) {
-        clearInterval(checkInterval);
-        const track = video.srcObject.getVideoTracks()[0];
-        if (!track) return;
-        currentCameraTrack = track;
-        try {
-          const capabilities = track.getCapabilities ? track.getCapabilities() : {};
-          if (capabilities.torch) {
-            document.getElementById('torchToggleBtn').style.display = 'flex';
-          }
-        } catch (e) { /* torch capability isn't supported on this browser — just skip the button */ }
-      }
-    }, 200);
-    setTimeout(() => clearInterval(checkInterval), 6000); // give up quietly if the stream never attaches
-  }
-
-  document.getElementById('torchToggleBtn').addEventListener('click', async () => {
-    if (!currentCameraTrack) return;
-    const nextState = !torchOn;
-    try {
-      await currentCameraTrack.applyConstraints({ advanced: [{ torch: nextState }] });
-      torchOn = nextState;
-      document.getElementById('torchToggleLabel').textContent = torchOn ? 'Turn off flashlight' : 'Turn on flashlight';
-    } catch (e) {
-      showToast('Couldn\u2019t control the flashlight on this device');
-    }
-  });
 
   document.getElementById('scanBtn').addEventListener('click', () => { scanning ? stopScan() : startScan(); });
 
@@ -4117,7 +4009,6 @@
   let bulkLastScanUpc = null;
   let bulkLastScanTime = 0;
   let bulkScanSessionItems = [];
-  let bulkScanLoopTimer = null;
 
   function openBulkScanModal() {
     bulkScanSessionItems = [];
@@ -4144,21 +4035,19 @@
 
   function stopBulkScan() {
     bulkScanning = false;
-    if (bulkScanLoopTimer) { clearTimeout(bulkScanLoopTimer); bulkScanLoopTimer = null; }
     if (bulkZxingReader) { try { bulkZxingReader.reset(); } catch (e) {} }
     const video = document.getElementById('bulkScanVideo');
     video.classList.remove('on');
     if (video.srcObject) { video.srcObject.getTracks().forEach(t => t.stop()); video.srcObject = null; }
     document.getElementById('bulkScanToggleBtn').classList.remove('active');
     document.getElementById('bulkScanToggleLabel').textContent = 'Start scanning';
-    document.getElementById('bulkScanTargetBox').style.display = 'none';
   }
 
   async function startBulkScan() {
     const errEl = document.getElementById('bulkScanError');
     errEl.style.display = 'none';
 
-    if (typeof ZXing === 'undefined' || typeof ZXingBrowser === 'undefined') {
+    if (typeof ZXing === 'undefined') {
       errEl.textContent = 'Scanner failed to load \u2014 check your connection, or type a UPC below.';
       errEl.style.display = 'block';
       return;
@@ -4174,7 +4063,6 @@
     bulkScanning = true;
     document.getElementById('bulkScanToggleBtn').classList.add('active');
     document.getElementById('bulkScanToggleLabel').textContent = 'Stop scanning';
-    document.getElementById('bulkScanTargetBox').style.display = 'block';
 
     const hints = new Map();
     hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
@@ -4185,35 +4073,31 @@
       ZXing.BarcodeFormat.CODABAR,
     ]);
     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-    bulkZxingReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
-    const constraints = { video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } } };
+    bulkZxingReader = new ZXing.BrowserMultiFormatReader(hints);
+    const constraints = { video: { facingMode: { ideal: 'environment' } } };
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia(constraints);
-      if (!bulkScanning) { stream.getTracks().forEach(t => t.stop()); return; }
-      video.srcObject = stream;
-      await video.play();
-      runCroppedScanLoop(video, bulkZxingReader, () => bulkScanning, (upc) => {
+    bulkZxingReader.decodeFromConstraints(constraints, video, (result, err) => {
+      if (result && bulkScanning) {
+        const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
+        const upc = normalizeScannedUpc(result.getText(), isUpcE);
         const now = Date.now();
         // Debounce: ignore the same barcode if it's still in frame from the last scan
         if (upc === bulkLastScanUpc && (now - bulkLastScanTime) < 2500) return;
         bulkLastScanUpc = upc;
         bulkLastScanTime = now;
         addBulkScannedUpc(upc);
-      }, (t) => { bulkScanLoopTimer = t; });
-    } catch (e) {
+      }
+    }).catch((e) => {
       let msg = 'Camera access was blocked or unavailable \u2014 type a UPC below.';
       if (e && e.name === 'NotAllowedError') {
         msg = 'Camera permission was denied. On iPhone: Settings \u2192 Safari \u2192 Camera \u2192 Allow, then try again.';
       } else if (e && e.name === 'NotFoundError') {
         msg = 'No camera found on this device \u2014 type a UPC below.';
-      } else if (e) {
-        msg = `Scanner error (${e.name || 'unknown'}): ${e.message || String(e)} \u2014 type a UPC below.`;
       }
       errEl.textContent = msg;
       errEl.style.display = 'block';
       stopBulkScan();
-    }
+    });
   }
   document.getElementById('bulkScanToggleBtn').addEventListener('click', () => { bulkScanning ? stopBulkScan() : startBulkScan(); });
 
