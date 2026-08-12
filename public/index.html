@@ -14,6 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/[email protected]/umd/zxing-browser.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 <style>
@@ -3954,7 +3955,7 @@
     const errEl = document.getElementById('scanError');
     errEl.style.display = 'none';
 
-    if (typeof ZXing === 'undefined') {
+    if (typeof ZXing === 'undefined' || typeof ZXingBrowser === 'undefined') {
       errEl.textContent = 'Scanner failed to load \u2014 check your connection, or enter the UPC manually below.';
       errEl.style.display = 'block';
       return;
@@ -3980,7 +3981,10 @@
       ZXing.BarcodeFormat.CODABAR,
     ]);
     hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
-    zxingReader = new ZXing.BrowserMultiFormatReader(hints);
+    // ZXingBrowser's reader (not the plain @zxing/library one) is required
+    // here — it's the only one that exposes decodeFromCanvas, which the
+    // cropped-region scan loop below depends on.
+    zxingReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
 
     // Ask for the camera directly (no device-listing step first) — on iOS Safari,
     // any async step before getUserMedia can break the "this came from a tap"
