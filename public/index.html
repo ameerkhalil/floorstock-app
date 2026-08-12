@@ -3928,6 +3928,8 @@
         msg = 'Camera permission was denied. On iPhone: Settings \u2192 Safari \u2192 Camera \u2192 Allow, or tap the \u201cAa\u201d icon in the address bar \u2192 Website Settings \u2192 Camera \u2192 Allow, then try again.';
       } else if (e && e.name === 'NotFoundError') {
         msg = 'No camera found on this device \u2014 enter the UPC manually below.';
+      } else if (e) {
+        msg = `Scanner error (${e.name || 'unknown'}): ${e.message || String(e)} \u2014 enter the UPC manually below.`;
       }
       errEl.textContent = msg;
       errEl.style.display = 'block';
@@ -4193,6 +4195,8 @@
         msg = 'Camera permission was denied. On iPhone: Settings \u2192 Safari \u2192 Camera \u2192 Allow, then try again.';
       } else if (e && e.name === 'NotFoundError') {
         msg = 'No camera found on this device \u2014 type a UPC below.';
+      } else if (e) {
+        msg = `Scanner error (${e.name || 'unknown'}): ${e.message || String(e)} \u2014 type a UPC below.`;
       }
       errEl.textContent = msg;
       errEl.style.display = 'block';
