@@ -181,6 +181,12 @@
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(28,37,48,0.55); display: none; align-items: center; justify-content: center; z-index: 250; padding: 16px; }
   .modal-overlay.open { display: flex; }
+  /* Locks the background page while any modal is open — without this, iOS
+     treats the modal's own scroll and the page behind it as two competing
+     scrollable regions, so a touch-scroll gesture can randomly land on
+     whichever one it feels like, including scrolling the background
+     instead of the modal, or stopping short of the modal's own bottom. */
+  body.modal-open { position: fixed; overflow: hidden; width: 100%; }
   /* Printing (labels / shelf QR codes) renders into this in-page container
      rather than a popup window — window.open() doesn't work inside the
      native app's WKWebView, which has no concept of a second browser
@@ -2984,11 +2990,15 @@
       showToast('Nothing to print');
       return;
     }
+    if (typeof QRCode === 'undefined') {
+      showToast('QR code library failed to load \u2014 check your connection and try again');
+      return;
+    }
     const root = ensurePrintRoot();
 
     const labelsHtml = locations.map((loc, i) => `
       <div class="shelf-label">
-        <canvas id="printQr-${i}"></canvas>
+        <canvas id="printQr-${i}" style="display:none;"></canvas>
         <div class="shelf-label-name">${esc(loc)}</div>
         <div class="shelf-label-sub">Scan for what's expiring here</div>
       </div>
@@ -2998,7 +3008,7 @@
       <style>
         #printRoot .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
         #printRoot .shelf-label { border: 1px dashed #999; border-radius: 6px; padding: 12px 8px; text-align: center; page-break-inside: avoid; }
-        #printRoot .shelf-label canvas { width: 100%; height: auto; max-width: 140px; }
+        #printRoot .shelf-label img { width: 100%; height: auto; max-width: 140px; }
         #printRoot .shelf-label-name { font-size: 13px; font-weight: 700; margin-top: 6px; }
         #printRoot .shelf-label-sub { font-size: 10px; color: #666; margin-top: 2px; }
         @media print { #printRoot .shelf-label { border: 1px solid #ccc; } }
@@ -3007,19 +3017,38 @@
     `;
 
     let remaining = locations.length;
+    let failures = 0;
     const triggerPrintWhenDone = () => {
       remaining--;
-      if (remaining <= 0) setTimeout(() => window.print(), 150);
+      if (remaining <= 0) {
+        if (failures > 0) {
+          showToast(`${failures} QR code${failures !== 1 ? 's' : ''} failed to generate \u2014 printing the rest`);
+        }
+        setTimeout(() => window.print(), 150);
+      }
     };
     locations.forEach((loc, i) => {
       const canvas = document.getElementById('printQr-' + i);
       try {
         // toCanvas is asynchronous — printing before it resolves would
         // capture a blank canvas, so wait for its callback before printing.
-        QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, () => {
+        QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, (err) => {
+          if (err) {
+            failures++;
+          } else {
+            // Swap the live canvas for a static image. A freshly-drawn
+            // canvas isn't reliably captured by every browser/webview's
+            // print-to-PDF pipeline (it's raster content painted outside
+            // the normal DOM paint tree) — a plain <img> with a data URL
+            // is unambiguous and prints correctly everywhere.
+            const img = document.createElement('img');
+            img.src = canvas.toDataURL('image/png');
+            canvas.replaceWith(img);
+          }
           triggerPrintWhenDone();
         });
       } catch (e) {
+        failures++;
         triggerPrintWhenDone(); // still let the rest print even if one code fails
       }
     });
@@ -4982,6 +5011,30 @@
       });
     });
   }
+
+  // Central body-scroll lock, covering every modal in the app at once.
+  // Every modal already just toggles the .open class on its own overlay
+  // (dozens of call sites) — rather than touching each one individually,
+  // this watches all of them and locks/unlocks the background page based
+  // on whether ANY modal is currently open.
+  let scrollLockY = 0;
+  function updateBodyScrollLock() {
+    const anyOpen = document.querySelector('.modal-overlay.open') !== null;
+    const alreadyLocked = document.body.classList.contains('modal-open');
+    if (anyOpen && !alreadyLocked) {
+      scrollLockY = window.scrollY;
+      document.body.classList.add('modal-open');
+      document.body.style.top = `-${scrollLockY}px`;
+    } else if (!anyOpen && alreadyLocked) {
+      document.body.classList.remove('modal-open');
+      document.body.style.top = '';
+      window.scrollTo(0, scrollLockY);
+    }
+  }
+  const modalScrollObserver = new MutationObserver(updateBodyScrollLock);
+  document.querySelectorAll('.modal-overlay').forEach(el => {
+    modalScrollObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
+  });
 
   checkExistingSession();
 })();
