@@ -64,6 +64,7 @@
   .auth-tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 8px; padding: 4px; margin-bottom: 20px; }
   .auth-tab { flex: 1; border: none; background: none; padding: 8px 0; border-radius: 6px; font-weight: 600; font-size: 13.5px; color: var(--muted-2); }
   .auth-tab.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(28,37,48,0.12); }
+  .lang-toggle-btn.active { background: var(--accent) !important; color: #fff !important; border-color: var(--accent) !important; }
   /* Manage modal reuses .auth-tab styling but has 8 tabs, not 2 — needs to
      scroll horizontally instead of squeezing into equal-width slices. */
   .manage-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
@@ -330,25 +331,30 @@
     </div>
 
     <div class="auth-tabs">
-      <button class="auth-tab active" id="tabLogin">Sign in</button>
-      <button class="auth-tab" id="tabRegister">New store</button>
+      <button class="auth-tab active" id="tabLogin" data-i18n="login_tab_signin">Sign in</button>
+      <button class="auth-tab" id="tabRegister" data-i18n="login_tab_newstore">New store</button>
+    </div>
+
+    <div style="display:flex; justify-content:center; gap:6px; margin-bottom:14px;">
+      <button type="button" data-lang-btn="en" class="lang-toggle-btn active" style="border:1px solid var(--border); background:#fff; border-radius:6px; padding:4px 10px; font-size:12px; font-weight:600; color:var(--muted-2);">EN</button>
+      <button type="button" data-lang-btn="es" class="lang-toggle-btn" style="border:1px solid var(--border); background:#fff; border-radius:6px; padding:4px 10px; font-size:12px; font-weight:600; color:var(--muted-2);">ES</button>
     </div>
 
     <div id="loginPane">
       <div class="auth-error" id="loginError" style="display:none;"></div>
       <form id="loginForm">
         <div class="auth-field">
-          <label>Username</label>
+          <label data-i18n="login_username">Username</label>
           <input type="text" id="loginUsername" autocomplete="username">
         </div>
         <div class="auth-field">
-          <label>Password</label>
+          <label data-i18n="login_password">Password</label>
           <input type="password" id="loginPassword" autocomplete="current-password">
         </div>
-        <button type="submit" class="auth-submit" id="loginSubmit">Sign in</button>
+        <button type="submit" class="auth-submit" id="loginSubmit" data-i18n="login_submit">Sign in</button>
       </form>
-      <button type="button" id="showForgotPasswordBtn" style="background:none; border:none; color:var(--accent); font-size:12.5px; font-weight:600; margin-top:10px; padding:0; display:block; margin-left:auto; margin-right:auto;">Forgot password?</button>
-      <div class="auth-hint">Workers: use the username and password your manager gave you.</div>
+      <button type="button" id="showForgotPasswordBtn" data-i18n="login_forgot" style="background:none; border:none; color:var(--accent); font-size:12.5px; font-weight:600; margin-top:10px; padding:0; display:block; margin-left:auto; margin-right:auto;">Forgot password?</button>
+      <div class="auth-hint" data-i18n="login_worker_hint">Workers: use the username and password your manager gave you.</div>
     </div>
 
     <div id="forgotPasswordPane" style="display:none;">
@@ -521,19 +527,19 @@
   <nav id="mobileBottomNav">
     <button type="button" id="navHomeBtn" class="nav-active">
       <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><path d="M9 22V12h6v10"/></svg>
-      Home
+      <span data-i18n="nav_home">Home</span>
     </button>
     <button type="button" id="navScanBtn">
       <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-      Scan
+      <span data-i18n="nav_scan">Scan</span>
     </button>
     <button type="button" id="navTasksBtn">
       <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 11 3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
-      <span id="navTasksLabel">Tasks</span>
+      <span id="navTasksLabel" data-i18n="nav_tasks">Tasks</span>
     </button>
     <button type="button" id="navMoreBtn">
       <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
-      More
+      <span data-i18n="nav_more">More</span>
     </button>
   </nav>
 
@@ -672,17 +678,17 @@
       <form id="itemForm">
         <input type="hidden" id="editId">
         <div>
-          <label class="field-label">UPC / barcode</label>
+          <label class="field-label" data-i18n="upc_label">UPC / barcode</label>
           <div class="upc-row">
             <input class="field-input mono" id="upcInput" placeholder="e.g. 041220576428">
             <button type="button" class="scan-btn" id="scanBtn">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
-              <span id="scanBtnLabel">Scan</span>
+              <span id="scanBtnLabel" data-i18n="scan_btn">Scan</span>
             </button>
           </div>
           <label style="display:flex; align-items:center; gap:7px; margin-top:8px; font-size:12.5px; font-weight:600; color:var(--muted-2); cursor:pointer;">
             <input type="checkbox" id="noUpcCheckbox" style="width:15px; height:15px; margin:0;">
-            This item doesn&rsquo;t have a barcode
+            <span data-i18n="upc_no_barcode">This item doesn&rsquo;t have a barcode</span>
           </label>
           <div class="scan-wrap" id="scanWrap">
             <video id="scanVideo" muted playsinline></video>
@@ -698,11 +704,11 @@
           <div id="existingBatches" style="display:none;"></div>
         </div>
         <div>
-          <label class="field-label">Product name</label>
+          <label class="field-label" data-i18n="product_name_label">Product name</label>
           <input class="field-input" id="nameInput" placeholder="e.g. Organic Whole Milk 1gal">
         </div>
         <div>
-          <label class="field-label">Category</label>
+          <label class="field-label" data-i18n="category_label">Category</label>
           <select class="field-input" id="categoryInput">
             <option value="">No category</option>
           </select>
@@ -719,41 +725,41 @@
           </div>
         </div>
         <div>
-          <label class="field-label">Batches</label>
+          <label class="field-label" data-i18n="batches_label">Batches</label>
           <div id="batchRows"></div>
           <button type="button" id="addBatchRowBtn" style="margin-top:6px; background:none; border:none; color:var(--accent); font-size:12.5px; font-weight:600; padding:4px 0; display:flex; align-items:center; gap:4px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
-            Add another expiration date
+            <span data-i18n="add_another_date">Add another expiration date</span>
           </button>
         </div>
         <div class="row-2">
           <div>
-            <label class="field-label">Unit</label>
+            <label class="field-label" data-i18n="unit_label">Unit</label>
             <select class="field-input" id="unitInput">
               <option>each</option><option>case</option><option>box</option><option>pallet</option>
               <option>lb</option><option>kg</option><option>oz</option><option>gal</option><option>L</option>
             </select>
           </div>
           <div>
-            <label class="field-label">Location on floor</label>
+            <label class="field-label" data-i18n="location_label">Location on floor</label>
             <input class="field-input" id="locInput" placeholder="e.g. Aisle 4, Shelf B" list="knownLocationsList" autocomplete="off">
             <datalist id="knownLocationsList"></datalist>
           </div>
         </div>
         <div class="row-2">
           <div>
-            <label class="field-label">Date purchased <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+            <label class="field-label"><span data-i18n="date_purchased_label">Date purchased</span> <span data-i18n="optional_suffix" style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
             <input class="field-input" type="date" id="datePurchasedInput">
           </div>
           <div>
-            <label class="field-label">Vendor <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+            <label class="field-label"><span data-i18n="vendor_label">Vendor</span> <span data-i18n="optional_suffix" style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
             <input class="field-input" id="vendorInput" placeholder="e.g. Sysco" list="knownVendorsList" autocomplete="off">
             <datalist id="knownVendorsList"></datalist>
           </div>
         </div>
         <div class="row-2">
           <div>
-            <label class="field-label">Size <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+            <label class="field-label"><span data-i18n="size_label">Size</span> <span data-i18n="optional_suffix" style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
             <input class="field-input mono" type="number" min="0" step="any" id="sizeValueInput" placeholder="e.g. 12">
           </div>
           <div>
@@ -771,14 +777,14 @@
         <div id="marketPriceNote" style="display:none; font-size:12px; color:var(--muted-2); margin-top:-8px;"></div>
         <div class="row-2">
           <div>
-            <label class="field-label">Cost price <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+            <label class="field-label"><span data-i18n="cost_price_label">Cost price</span> <span data-i18n="optional_suffix" style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
             <div style="position:relative;">
               <span style="position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:13px;">$</span>
               <input class="field-input mono" type="number" min="0" step="any" id="costPriceInput" placeholder="0.00" style="padding-left:22px;">
             </div>
           </div>
           <div>
-            <label class="field-label">Target margin</label>
+            <label class="field-label" data-i18n="target_margin_label">Target margin</label>
             <div style="position:relative;">
               <input class="field-input mono" type="number" min="0" max="99" step="1" id="targetMarginInput" placeholder="50" value="50" style="padding-right:26px;">
               <span style="position:absolute; right:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:13px;">%</span>
@@ -786,7 +792,7 @@
           </div>
         </div>
         <div>
-          <label class="field-label">Selling price <span style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
+          <label class="field-label"><span data-i18n="selling_price_label">Selling price</span> <span data-i18n="optional_suffix" style="font-weight:400; color:var(--muted); text-transform:none; letter-spacing:0;">(optional)</span></label>
           <div style="position:relative;">
             <span style="position:absolute; left:11px; top:50%; transform:translateY(-50%); color:var(--muted); font-size:13px;">$</span>
             <input class="field-input mono" type="number" min="0" step="any" id="sellingPriceInput" placeholder="0.00" style="padding-left:22px;">
@@ -794,7 +800,7 @@
         </div>
         <div id="priceSuggestNote" style="display:none; font-size:12px; color:var(--muted-2); margin-top:-8px;"></div>
         <div class="form-error" id="formError" style="display:none;"></div>
-        <button type="submit" class="submit-btn" id="submitBtn">Add to floor</button>
+        <button type="submit" class="submit-btn" id="submitBtn" data-i18n="submit_add">Add to floor</button>
       </form>
     </div>
   </div>
@@ -836,14 +842,14 @@
   <div class="modal-overlay" id="myTasksOverlay">
     <div class="modal">
       <div class="modal-header">
-        <div class="modal-title">MY TASKS</div>
+        <div class="modal-title" data-i18n="my_tasks_title" style="text-transform:uppercase;">My Tasks</div>
         <button class="modal-close" id="myTasksCloseBtn">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
       <div style="padding: 18px;">
         <div id="myTasksList" style="display:flex; flex-direction:column; gap:8px;"></div>
-        <div id="myTasksEmpty" style="font-size:13px; color:var(--muted); display:none;">Nothing assigned to you right now.</div>
+        <div id="myTasksEmpty" data-i18n="my_tasks_empty" style="font-size:13px; color:var(--muted); display:none;">Nothing assigned to you right now.</div>
       </div>
     </div>
   </div>
@@ -1078,25 +1084,25 @@
   <div class="modal-overlay" id="removeReasonOverlay">
     <div class="modal" style="max-width:360px;">
       <div class="modal-header">
-        <div class="modal-title">REMOVE TAG</div>
+        <div class="modal-title" data-i18n="remove_tag_title" style="text-transform:uppercase;">Remove tag</div>
         <button class="modal-close" id="removeReasonCancelBtn">
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
       <div style="padding: 18px;">
-        <p style="font-size:13.5px; color:var(--muted-2); margin-top:0; margin-bottom:16px;">Why is this being removed? This helps track how much stock gets sold versus lost.</p>
+        <p data-i18n="remove_tag_prompt" style="font-size:13.5px; color:var(--muted-2); margin-top:0; margin-bottom:16px;">Why is this being removed? This helps track how much stock gets sold versus lost.</p>
         <div style="display:flex; flex-direction:column; gap:8px;">
           <button type="button" id="removeReasonSold" style="display:flex; align-items:center; gap:10px; background:var(--ok-tint); color:var(--ok-text); border:none; border-radius:8px; padding:12px 14px; font-weight:600; font-size:13.5px; text-align:left;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9 12l2 2 4-4"/></svg>
-            Sold
+            <span data-i18n="reason_sold">Sold</span>
           </button>
           <button type="button" id="removeReasonExpired" style="display:flex; align-items:center; gap:10px; background:var(--expired-tint); color:var(--expired-band); border:none; border-radius:8px; padding:12px 14px; font-weight:600; font-size:13.5px; text-align:left;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m21.73 18-8-14a2 2 0 0 0-3.46 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>
-            Expired / discarded
+            <span data-i18n="reason_expired">Expired / discarded</span>
           </button>
           <button type="button" id="removeReasonOther" style="display:flex; align-items:center; gap:10px; background:var(--surface); color:var(--muted-2); border:none; border-radius:8px; padding:12px 14px; font-weight:600; font-size:13.5px; text-align:left;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>
-            Other
+            <span data-i18n="reason_other">Other</span>
           </button>
         </div>
       </div>
@@ -1419,6 +1425,98 @@
   window.addEventListener('online', flushOfflineQueue);
 
 
+  // =====================================================================
+  // TRANSLATION (Spanish toggle for worker-facing screens)
+  // =====================================================================
+  // Scoped deliberately: login, bottom nav, the New Tag/scan form, My
+  // Tasks, and the sell/remove flow — the screens a Spanish-speaking
+  // worker actually lives in day to day. Manager-only screens (Reports,
+  // Billing, the Manage modal, the Founder dashboard) stay English-only
+  // for now; extending coverage later just means adding more keys below
+  // and more data-i18n attributes in the markup, the mechanism already
+  // supports it everywhere.
+  const TRANSLATIONS = {
+    en: {
+      nav_home: 'Home', nav_scan: 'Scan', nav_tasks: 'Tasks', nav_more: 'More',
+      login_tab_signin: 'Sign in', login_tab_newstore: 'New store',
+      login_username: 'Username', login_password: 'Password',
+      login_submit: 'Sign in', login_forgot: 'Forgot password?',
+      login_worker_hint: 'Workers: use the username and password your manager gave you.',
+      lang_toggle_label: 'Language',
+      upc_label: 'UPC / barcode', upc_no_barcode: 'This item doesn\u2019t have a barcode',
+      scan_btn: 'Scan', scan_btn_stop: 'Stop',
+      product_name_label: 'Product name', category_label: 'Category',
+      batches_label: 'Batches', add_another_date: '+ Add another expiration date',
+      unit_label: 'Unit', location_label: 'Location on floor',
+      date_purchased_label: 'Date purchased', vendor_label: 'Vendor',
+      size_label: 'Size', cost_price_label: 'Cost price',
+      target_margin_label: 'Target margin', selling_price_label: 'Selling price',
+      optional_suffix: '(optional)',
+      submit_add: 'Add to floor', submit_save: 'Save changes',
+      my_tasks_title: 'My Tasks', my_tasks_empty: 'Nothing assigned to you right now.',
+      task_done: 'Done', task_reopen: 'Reopen',
+      remove_tag_title: 'Remove tag', remove_tag_prompt: 'Why is this being removed? This helps track how much stock gets sold versus lost.',
+      reason_sold: 'Sold', reason_expired: 'Expired / discarded', reason_other: 'Other',
+      tag_sell: 'Sell', tag_edit: 'Edit',
+      sell_prompt: (unit, max) => `How many ${unit} were just sold? (${max} on hand)`,
+      sell_invalid_qty: 'Enter a valid quantity',
+      sell_success: (qty, unit) => `Sold ${qty} ${unit}`,
+      sell_error: 'Couldn\u2019t log that sale',
+      saving_label: 'Saving\u2026',
+    },
+    es: {
+      nav_home: 'Inicio', nav_scan: 'Escanear', nav_tasks: 'Tareas', nav_more: 'M\u00e1s',
+      login_tab_signin: 'Iniciar sesi\u00f3n', login_tab_newstore: 'Tienda nueva',
+      login_username: 'Usuario', login_password: 'Contrase\u00f1a',
+      login_submit: 'Iniciar sesi\u00f3n', login_forgot: '\u00bfOlvidaste tu contrase\u00f1a?',
+      login_worker_hint: 'Empleados: usen el usuario y la contrase\u00f1a que les dio su gerente.',
+      lang_toggle_label: 'Idioma',
+      upc_label: 'UPC / c\u00f3digo de barras', upc_no_barcode: 'Este producto no tiene c\u00f3digo de barras',
+      scan_btn: 'Escanear', scan_btn_stop: 'Detener',
+      product_name_label: 'Nombre del producto', category_label: 'Categor\u00eda',
+      batches_label: 'Lotes', add_another_date: '+ Agregar otra fecha de vencimiento',
+      unit_label: 'Unidad', location_label: 'Ubicaci\u00f3n en el piso',
+      date_purchased_label: 'Fecha de compra', vendor_label: 'Proveedor',
+      size_label: 'Tama\u00f1o', cost_price_label: 'Precio de costo',
+      target_margin_label: 'Margen objetivo', selling_price_label: 'Precio de venta',
+      optional_suffix: '(opcional)',
+      submit_add: 'Agregar al piso', submit_save: 'Guardar cambios',
+      my_tasks_title: 'Mis tareas', my_tasks_empty: 'No tienes tareas asignadas por ahora.',
+      task_done: 'Hecho', task_reopen: 'Reabrir',
+      remove_tag_title: 'Quitar etiqueta', remove_tag_prompt: '\u00bfPor qu\u00e9 se est\u00e1 quitando esto? Esto ayuda a saber cu\u00e1nto se vendi\u00f3 y cu\u00e1nto se perdi\u00f3.',
+      reason_sold: 'Vendido', reason_expired: 'Vencido / desechado', reason_other: 'Otro',
+      tag_sell: 'Vender', tag_edit: 'Editar',
+      sell_prompt: (unit, max) => `\u00bfCu\u00e1ntos ${unit} se vendieron? (${max} disponibles)`,
+      sell_invalid_qty: 'Ingresa una cantidad v\u00e1lida',
+      sell_success: (qty, unit) => `Se vendieron ${qty} ${unit}`,
+      sell_error: 'No se pudo registrar la venta',
+      saving_label: 'Guardando\u2026',
+    },
+  };
+
+  let currentLang = localStorage.getItem('floorstock_lang') || 'en';
+  function t(key, ...args) {
+    const entry = (TRANSLATIONS[currentLang] || TRANSLATIONS.en)[key] ?? TRANSLATIONS.en[key] ?? key;
+    return typeof entry === 'function' ? entry(...args) : entry;
+  }
+  function setLang(lang) {
+    currentLang = (lang === 'es') ? 'es' : 'en';
+    localStorage.setItem('floorstock_lang', currentLang);
+    applyTranslations();
+  }
+  function applyTranslations() {
+    document.querySelectorAll('[data-i18n]').forEach(el => {
+      el.textContent = t(el.dataset.i18n);
+    });
+    document.querySelectorAll('[data-i18n-placeholder]').forEach(el => {
+      el.placeholder = t(el.dataset.i18nPlaceholder);
+    });
+    document.documentElement.lang = currentLang;
+    document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+      btn.classList.toggle('active', btn.dataset.langBtn === currentLang);
+    });
+  }
+
   function esc(str) {
     const d = document.createElement('div'); d.textContent = str == null ? '' : String(str);
     return d.innerHTML;
@@ -1439,6 +1537,10 @@
   // =====================================================================
 
   document.getElementById('tabLogin').addEventListener('click', () => switchAuthTab('login'));
+
+  document.querySelectorAll('[data-lang-btn]').forEach(btn => {
+    btn.addEventListener('click', () => setLang(btn.dataset.langBtn));
+  });
   document.getElementById('tabRegister').addEventListener('click', () => switchAuthTab('register'));
 
   function switchAuthTab(which) {
@@ -2073,16 +2175,16 @@
       return;
     }
     emptyEl.style.display = 'none';
-    listEl.innerHTML = tasks.map(t => {
-      const due = t.status === 'open' ? taskDueMeta(t.dueAt) : null;
+    listEl.innerHTML = tasks.map(task => {
+      const due = task.status === 'open' ? taskDueMeta(task.dueAt) : null;
       const dueColor = due ? (due.overdue ? 'var(--expired-band)' : (due.dueSoon ? 'var(--critical-band)' : 'var(--muted)')) : '';
       return `
-      <div class="location-row ${t.status === 'done' ? 'current' : ''}" style="cursor:default;">
-        <span style="${t.status === 'done' ? 'text-decoration:line-through; opacity:0.7;' : ''}">
-          ${esc(t.title)}
+      <div class="location-row ${task.status === 'done' ? 'current' : ''}" style="cursor:default;">
+        <span style="${task.status === 'done' ? 'text-decoration:line-through; opacity:0.7;' : ''}">
+          ${esc(task.title)}
           ${due ? `<div class="loc-addr" style="color:${dueColor}; font-weight:${due.overdue ? '700' : '400'};">${esc(due.label)}</div>` : ''}
         </span>
-        <button type="button" class="add-worker-btn" data-toggle-task="${t.id}" style="padding:6px 12px; font-size:12px; width:auto;">${t.status === 'done' ? 'Reopen' : 'Done'}</button>
+        <button type="button" class="add-worker-btn" data-toggle-task="${task.id}" style="padding:6px 12px; font-size:12px; width:auto;">${task.status === 'done' ? t('task_reopen') : t('task_done')}</button>
       </div>
     `;
     }).join('');
@@ -3710,11 +3812,11 @@
           <div class="tag-actions">
             <button type="button" class="sell-btn" data-id="${it.id}" data-unit="${esc(it.unit)}" data-max="${esc(it.quantity)}">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2v20M17 5H9.5a3.5 3.5 0 0 0 0 7h5a3.5 3.5 0 0 1 0 7H6"/></svg>
-              Sell
+              ${t('tag_sell')}
             </button>
             <button type="button" class="edit-btn" data-id="${it.id}">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>
-              Edit
+              ${t('tag_edit')}
             </button>
             <button type="button" class="del-btn" data-id="${it.id}">
               <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
@@ -3776,11 +3878,11 @@
     const id = btn.dataset.id;
     const unit = btn.dataset.unit;
     const max = btn.dataset.max;
-    const raw = prompt(`How many ${unit} were just sold? (${max} on hand)`, '1');
+    const raw = prompt(t('sell_prompt', unit, max), '1');
     if (raw === null) return;
     const quantity = Number(raw);
     if (!Number.isFinite(quantity) || quantity <= 0) {
-      showToast('Enter a valid quantity');
+      showToast(t('sell_invalid_qty'));
       return;
     }
     try {
@@ -3790,9 +3892,9 @@
       });
       items = items.map(i => i.id === id ? result.item : i);
       renderAll();
-      showToast(`Sold ${quantity} ${unit}`);
+      showToast(t('sell_success', quantity, unit));
     } catch (e) {
-      showToast(e.message || 'Couldn\u2019t log that sale');
+      showToast(e.message || t('sell_error'));
     }
   }
 
@@ -4146,7 +4248,7 @@
     const item = editingId ? items.find(i => i.id === editingId) : null;
 
     document.getElementById('modalTitle').textContent = item ? 'EDIT TAG' : 'NEW TAG';
-    document.getElementById('submitBtn').textContent = item ? 'Save changes' : 'Add to floor';
+    document.getElementById('submitBtn').textContent = item ? t('submit_save') : t('submit_add');
     document.getElementById('editId').value = editingId || '';
     document.getElementById('upcInput').value = item ? (item.upc && item.upc.startsWith('NOUPC-') ? '' : item.upc) : '';
     document.getElementById('noUpcCheckbox').checked = !!(item && item.upc && item.upc.startsWith('NOUPC-'));
@@ -4191,7 +4293,7 @@
     const isNoUpc = pending.upc && pending.upc.startsWith('NOUPC-');
 
     document.getElementById('modalTitle').textContent = 'COMPLETE SCAN';
-    document.getElementById('submitBtn').textContent = 'Add to floor';
+    document.getElementById('submitBtn').textContent = t('submit_add');
     document.getElementById('editId').value = '';
     document.getElementById('upcInput').value = isNoUpc ? 'No barcode' : pending.upc;
     document.getElementById('upcInput').disabled = true;
@@ -4305,7 +4407,7 @@
     const originalLabel = submitBtn.textContent;
     isSubmitting = true;
     submitBtn.disabled = true;
-    submitBtn.textContent = 'Saving\u2026';
+    submitBtn.textContent = t('saving_label');
 
     try {
       if (editingId) {
@@ -5053,6 +5155,7 @@
     modalScrollObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
   });
 
+  applyTranslations();
   checkExistingSession();
 })();
 </script>
