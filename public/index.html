@@ -285,18 +285,6 @@
 </style>
 </head>
 <body>
-<!-- TEMPORARY DIAGNOSTIC — remove once the Capacitor/native detection issue is resolved -->
-<div id="capacitorDiagBanner" style="position:fixed; top:0; left:0; right:0; z-index:99999; background:#000; color:#0f0; font-family:monospace; font-size:11px; padding:6px 10px; text-align:center;"></div>
-<script>
-  (function() {
-    var el = document.getElementById('capacitorDiagBanner');
-    var hasCapacitor = typeof window.Capacitor !== 'undefined';
-    var isNative = hasCapacitor && typeof window.Capacitor.isNativePlatform === 'function' ? window.Capacitor.isNativePlatform() : 'n/a';
-    var plugins = hasCapacitor && window.Capacitor.Plugins ? Object.keys(window.Capacitor.Plugins).join(', ') : 'none';
-    el.textContent = 'Capacitor: ' + hasCapacitor + ' | isNative: ' + isNative + ' | plugins: ' + plugins;
-  })();
-</script>
-
 
 <!-- ============ AUTH SCREEN ============ -->
 <div class="lock-wrap" id="faceIdLockScreen" style="display:none;">
@@ -1527,24 +1515,45 @@
 
   // Force re-authentication every time the app is actually left and
   // returned to — not on brief interruptions like a permission dialog or a
-  // notification banner, which also toggle document visibility momentarily.
-  // Scoped to the native app only: a manager checking email in another
-  // browser tab on their office desktop shouldn't get logged out constantly,
-  // but a shared shop-floor device should always prompt for the next
-  // person's own credentials before they can add or edit anything.
+  // notification banner. Scoped to the native app only: a manager checking
+  // email in another browser tab on their office desktop shouldn't get
+  // logged out constantly, but a shared shop-floor device should always
+  // prompt for the next person's own credentials before they can add or
+  // edit anything.
+  //
+  // Prefers Capacitor's App plugin (appStateChange) once installed — it's
+  // built specifically to detect real OS-level backgrounding reliably.
+  // Falls back to the web Page Visibility API in the meantime, which is
+  // usually close enough but isn't guaranteed to fire on every native
+  // background/foreground transition in a bare WKWebView.
   const AUTO_LOGOUT_THRESHOLD_MS = 5000;
   let hiddenAt = null;
-  document.addEventListener('visibilitychange', () => {
-    if (!window.Capacitor || !Capacitor.isNativePlatform()) return;
-    if (document.hidden) {
-      hiddenAt = Date.now();
-    } else if (hiddenAt && (Date.now() - hiddenAt) > AUTO_LOGOUT_THRESHOLD_MS) {
+  function handleAppHidden() {
+    hiddenAt = Date.now();
+  }
+  function handleAppVisible() {
+    if (hiddenAt && (Date.now() - hiddenAt) > AUTO_LOGOUT_THRESHOLD_MS) {
       hiddenAt = null;
       if (currentUser) performLogout('Signed out \u2014 sign back in to continue');
     } else {
       hiddenAt = null;
     }
-  });
+  }
+  function initAutoLogoutOnBackground() {
+    if (!window.Capacitor || !Capacitor.isNativePlatform()) return; // web/PWA — doesn't apply
+    const AppPlugin = Capacitor.Plugins && Capacitor.Plugins.App;
+    if (AppPlugin) {
+      AppPlugin.addListener('appStateChange', (state) => {
+        if (state.isActive) handleAppVisible(); else handleAppHidden();
+      });
+    } else {
+      // @capacitor/app isn't installed yet — fall back to the web API.
+      document.addEventListener('visibilitychange', () => {
+        if (document.hidden) handleAppHidden(); else handleAppVisible();
+      });
+    }
+  }
+  initAutoLogoutOnBackground();
 
   document.getElementById('logoutBtn').addEventListener('click', () => performLogout());
 
