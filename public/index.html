@@ -3962,7 +3962,19 @@
       if (isActiveFn()) setTimerFn(setTimeout(() => runCroppedScanLoop(video, reader, isActiveFn, onSuccess, setTimerFn), 120));
     };
 
-    reader.decodeFromCanvas(canvas).then(result => {
+    // decodeFromCanvas normally returns a rejected promise when nothing is
+    // found in a frame, but can also throw synchronously on some calls —
+    // catch both the same way, since "nothing found this frame" is the
+    // expected, constant, non-fatal outcome while actively scanning.
+    let decodePromise;
+    try {
+      decodePromise = reader.decodeFromCanvas(canvas);
+    } catch (syncErr) {
+      scheduleNext();
+      return;
+    }
+
+    Promise.resolve(decodePromise).then(result => {
       if (result && isActiveFn()) {
         const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
         const upc = normalizeScannedUpc(result.getText(), isUpcE);
