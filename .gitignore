@@ -4,3 +4,14 @@ floorstock.db-journal
 floorstock.db-wal
 floorstock.db-shm
 .DS_Store
+
+floorstock.zip
+
+node_modules/
+
+ios/App/App.xcodeproj/xcuserdata/
+
+ios/App/App.xcodeproj/project.xcworkspace/xcuserdata/
+
+ios/App/App.xcodeproj/project.xcworkspace/xcshareddata/swiftpm/
+
