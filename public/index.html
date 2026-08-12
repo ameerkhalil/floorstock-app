@@ -191,6 +191,16 @@
   .scan-btn.active { background: var(--expired-tint); color: var(--expired-band); }
   #scanVideo { width: 100%; border-radius: 7px; margin-top: 8px; background: #000; display: none; max-height: 260px; object-fit: cover; }
   #scanVideo.on { display: block; }
+  .scan-wrap { position: relative; display: none; margin-top: 8px; }
+  .scan-wrap.on { display: block; }
+  .scan-wrap #scanVideo { display: block; margin-top: 0; }
+  .scan-guide-overlay { position: absolute; inset: 0; pointer-events: none; border-radius: 7px; overflow: hidden; }
+  .scan-guide-box { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 78%; height: 34%; border: 2px solid rgba(255,255,255,0.85); border-radius: 8px; box-shadow: 0 0 0 2000px rgba(0,0,0,0.35); }
+  .scan-guide-box.found { border-color: var(--ok-band); box-shadow: 0 0 0 2000px rgba(0,0,0,0.35), 0 0 12px 2px rgba(63,143,95,0.7); }
+  .scan-guide-box::before, .scan-guide-box::after { content: ''; position: absolute; width: 18px; height: 18px; border-color: #fff; }
+  .torch-btn { position: absolute; top: 8px; right: 8px; width: 34px; height: 34px; border-radius: 50%; background: rgba(0,0,0,0.5); border: none; color: #fff; display: none; align-items: center; justify-content: center; pointer-events: auto; }
+  .torch-btn.show { display: flex; }
+  .torch-btn.active { background: var(--amber); color: var(--ink); }
   .scan-error { font-size: 12px; color: var(--critical-text); margin-top: 6px; }
   .lookup-note { font-size: 12px; margin-top: 6px; display: none; align-items: center; gap: 5px; }
   .lookup-note.show { display: flex; }
@@ -598,7 +608,15 @@
             <input type="checkbox" id="noUpcCheckbox" style="width:15px; height:15px; margin:0;">
             This item doesn&rsquo;t have a barcode
           </label>
-          <video id="scanVideo" muted playsinline></video>
+          <div class="scan-wrap" id="scanWrap">
+            <video id="scanVideo" muted playsinline></video>
+            <div class="scan-guide-overlay">
+              <div class="scan-guide-box" id="scanGuideBox"></div>
+            </div>
+            <button type="button" class="torch-btn" id="torchToggleBtn" title="Toggle flashlight">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 2h-13L2 9.5 12 22 22 9.5 18.5 2z"/><path d="M12 2v20"/></svg>
+            </button>
+          </div>
           <div class="scan-error" id="scanError" style="display:none;"></div>
           <div class="lookup-note" id="lookupNote"></div>
           <div id="existingBatches" style="display:none;"></div>
@@ -3836,20 +3854,100 @@
   // ---------- barcode scanning (ZXing — works in Safari/iOS unlike BarcodeDetector) ----------
   let zxingReader = null;
   let scanning = false;
+  let scanMediaStream = null;
+  let scanVideoTrack = null;
+  let torchOn = false;
+  let scanLoopHandle = null;
+  let scanCanvas = null;
 
   function stopScan() {
     scanning = false;
-    if (zxingReader) {
-      try { zxingReader.reset(); } catch (e) {}
-    }
+    if (scanLoopHandle) { cancelAnimationFrame(scanLoopHandle); scanLoopHandle = null; }
+    if (zxingReader) { try { zxingReader.reset(); } catch (e) {} }
     const video = document.getElementById('scanVideo');
-    video.classList.remove('on');
-    if (video.srcObject) {
-      video.srcObject.getTracks().forEach(t => t.stop());
-      video.srcObject = null;
+    document.getElementById('scanWrap').classList.remove('on');
+    if (scanMediaStream) {
+      scanMediaStream.getTracks().forEach(t => t.stop());
+      scanMediaStream = null;
     }
+    video.srcObject = null;
+    scanVideoTrack = null;
+    torchOn = false;
+    const torchBtn = document.getElementById('torchToggleBtn');
+    torchBtn.classList.remove('show', 'active');
+    document.getElementById('scanGuideBox').classList.remove('found');
     document.getElementById('scanBtn').classList.remove('active');
     document.getElementById('scanBtnLabel').textContent = 'Scan';
+  }
+
+  // Errors ZXing throws on every frame where no barcode happens to be in
+  // view yet — these are normal and expected, not failures. Only
+  // unrecognized errors get surfaced to the person.
+  function isBenignScanError(e) {
+    if (!e) return true;
+    const name = e.name || '';
+    return name === 'NotFoundException' || name === 'ChecksumException' || name === 'FormatException';
+  }
+
+  async function toggleTorch() {
+    if (!scanVideoTrack) return;
+    torchOn = !torchOn;
+    try {
+      await scanVideoTrack.applyConstraints({ advanced: [{ torch: torchOn }] });
+      document.getElementById('torchToggleBtn').classList.toggle('active', torchOn);
+    } catch (e) {
+      torchOn = !torchOn; // revert if the device rejected it
+    }
+  }
+
+  // Crops each video frame down to the guide-box region before decoding.
+  // This both speeds up decoding (less area to search) and improves
+  // accuracy on small or densely-packed barcodes, since ZXing isn't
+  // wasting cycles on background clutter outside the box.
+  function runCroppedScanLoop() {
+    const video = document.getElementById('scanVideo');
+    const guideBox = document.getElementById('scanGuideBox');
+    if (!scanning || !video.videoWidth) {
+      scanLoopHandle = requestAnimationFrame(runCroppedScanLoop);
+      return;
+    }
+    if (!scanCanvas) scanCanvas = document.createElement('canvas');
+
+    // Map the guide box's on-screen percentage position onto the video's
+    // native pixel dimensions (object-fit: cover means displayed size and
+    // native size can differ).
+    const boxWidthFrac = 0.78, boxHeightFrac = 0.34;
+    const cropW = Math.round(video.videoWidth * boxWidthFrac);
+    const cropH = Math.round(video.videoHeight * boxHeightFrac);
+    const cropX = Math.round((video.videoWidth - cropW) / 2);
+    const cropY = Math.round((video.videoHeight - cropH) / 2);
+
+    scanCanvas.width = cropW;
+    scanCanvas.height = cropH;
+    const ctx = scanCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    try {
+      const result = zxingReader.decodeFromCanvas(scanCanvas);
+      if (result && scanning) {
+        guideBox.classList.add('found');
+        const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
+        const upc = normalizeScannedUpc(result.getText(), isUpcE);
+        document.getElementById('upcInput').value = upc;
+        lookupUpc(upc);
+        checkExistingBatches(upc);
+        setTimeout(stopScan, 120); // brief flash of the success state before closing
+        return;
+      }
+    } catch (e) {
+      if (!isBenignScanError(e)) {
+        const errEl = document.getElementById('scanError');
+        errEl.textContent = 'Scanner error \u2014 ' + (e && e.message ? e.message : 'try again or enter the UPC manually below.');
+        errEl.style.display = 'block';
+      }
+    }
+
+    if (scanning) scanLoopHandle = requestAnimationFrame(runCroppedScanLoop);
   }
 
   async function startScan() {
@@ -3868,7 +3966,7 @@
     }
 
     const video = document.getElementById('scanVideo');
-    video.classList.add('on');
+    document.getElementById('scanWrap').classList.add('on');
     scanning = true;
     document.getElementById('scanBtn').classList.add('active');
     document.getElementById('scanBtnLabel').textContent = 'Stop';
@@ -3887,18 +3985,27 @@
     // Ask for the camera directly (no device-listing step first) — on iOS Safari,
     // any async step before getUserMedia can break the "this came from a tap"
     // chain and cause the permission request to be silently blocked.
-    const constraints = { video: { facingMode: { ideal: 'environment' } } };
-
-    zxingReader.decodeFromConstraints(constraints, video, (result, err) => {
-      if (result && scanning) {
-        const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
-        const upc = normalizeScannedUpc(result.getText(), isUpcE);
-        document.getElementById('upcInput').value = upc;
-        lookupUpc(upc);
-        checkExistingBatches(upc);
-        stopScan();
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
       }
-    }).catch((e) => {
+    };
+
+    try {
+      scanMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = scanMediaStream;
+      await video.play();
+
+      scanVideoTrack = scanMediaStream.getVideoTracks()[0];
+      const caps = scanVideoTrack.getCapabilities ? scanVideoTrack.getCapabilities() : {};
+      if (caps && caps.torch) {
+        document.getElementById('torchToggleBtn').classList.add('show');
+      }
+
+      scanLoopHandle = requestAnimationFrame(runCroppedScanLoop);
+    } catch (e) {
       let msg = 'Camera access was blocked or unavailable \u2014 enter the UPC manually below.';
       if (e && e.name === 'NotAllowedError') {
         msg = 'Camera permission was denied. On iPhone: Settings \u2192 Safari \u2192 Camera \u2192 Allow, or tap the \u201cAa\u201d icon in the address bar \u2192 Website Settings \u2192 Camera \u2192 Allow, then try again.';
@@ -3908,10 +4015,11 @@
       errEl.textContent = msg;
       errEl.style.display = 'block';
       stopScan();
-    });
+    }
   }
 
   document.getElementById('scanBtn').addEventListener('click', () => { scanning ? stopScan() : startScan(); });
+  document.getElementById('torchToggleBtn').addEventListener('click', toggleTorch);
 
   // =====================================================================
   // PENDING ITEMS (bulk scan queue — never counted in inventory totals
