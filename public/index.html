@@ -285,6 +285,18 @@
 </style>
 </head>
 <body>
+<!-- TEMPORARY DIAGNOSTIC — remove once the Capacitor/native detection issue is resolved -->
+<div id="capacitorDiagBanner" style="position:fixed; top:0; left:0; right:0; z-index:99999; background:#000; color:#0f0; font-family:monospace; font-size:11px; padding:6px 10px; text-align:center;"></div>
+<script>
+  (function() {
+    var el = document.getElementById('capacitorDiagBanner');
+    var hasCapacitor = typeof window.Capacitor !== 'undefined';
+    var isNative = hasCapacitor && typeof window.Capacitor.isNativePlatform === 'function' ? window.Capacitor.isNativePlatform() : 'n/a';
+    var plugins = hasCapacitor && window.Capacitor.Plugins ? Object.keys(window.Capacitor.Plugins).join(', ') : 'none';
+    el.textContent = 'Capacitor: ' + hasCapacitor + ' | isNative: ' + isNative + ' | plugins: ' + plugins;
+  })();
+</script>
+
 
 <!-- ============ AUTH SCREEN ============ -->
 <div class="lock-wrap" id="faceIdLockScreen" style="display:none;">
