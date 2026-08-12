@@ -1530,9 +1530,12 @@
   let hiddenAt = null;
   function handleAppHidden() {
     hiddenAt = Date.now();
+    showToast('[diag] app hidden'); // TEMPORARY — remove once auto-logout is confirmed working
   }
   function handleAppVisible() {
-    if (hiddenAt && (Date.now() - hiddenAt) > AUTO_LOGOUT_THRESHOLD_MS) {
+    const elapsed = hiddenAt ? (Date.now() - hiddenAt) : null;
+    showToast(`[diag] app visible, hidden for ${elapsed}ms`); // TEMPORARY
+    if (hiddenAt && elapsed > AUTO_LOGOUT_THRESHOLD_MS) {
       hiddenAt = null;
       if (currentUser) performLogout('Signed out \u2014 sign back in to continue');
     } else {
@@ -1540,14 +1543,19 @@
     }
   }
   function initAutoLogoutOnBackground() {
-    if (!window.Capacitor || !Capacitor.isNativePlatform()) return; // web/PWA — doesn't apply
+    if (!window.Capacitor || !Capacitor.isNativePlatform()) {
+      showToast('[diag] not native — auto-logout skipped'); // TEMPORARY
+      return;
+    }
     const AppPlugin = Capacitor.Plugins && Capacitor.Plugins.App;
     if (AppPlugin) {
+      showToast('[diag] using App plugin for auto-logout'); // TEMPORARY
       AppPlugin.addListener('appStateChange', (state) => {
+        showToast('[diag] appStateChange isActive=' + state.isActive); // TEMPORARY
         if (state.isActive) handleAppVisible(); else handleAppHidden();
       });
     } else {
-      // @capacitor/app isn't installed yet — fall back to the web API.
+      showToast('[diag] App plugin missing — using visibilitychange fallback'); // TEMPORARY
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) handleAppHidden(); else handleAppVisible();
       });
