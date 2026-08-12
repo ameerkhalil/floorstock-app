@@ -64,6 +64,11 @@
   .auth-tabs { display: flex; gap: 4px; background: var(--surface); border-radius: 8px; padding: 4px; margin-bottom: 20px; }
   .auth-tab { flex: 1; border: none; background: none; padding: 8px 0; border-radius: 6px; font-weight: 600; font-size: 13.5px; color: var(--muted-2); }
   .auth-tab.active { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(28,37,48,0.12); }
+  /* Manage modal reuses .auth-tab styling but has 8 tabs, not 2 — needs to
+     scroll horizontally instead of squeezing into equal-width slices. */
+  .manage-tabs { overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; }
+  .manage-tabs::-webkit-scrollbar { display: none; }
+  .manage-tabs .auth-tab { flex: 0 0 auto; padding: 8px 14px; white-space: nowrap; }
   .auth-field { margin-bottom: 14px; }
   .auth-field label { display: block; font-size: 12.5px; font-weight: 600; color: var(--muted-2); margin-bottom: 5px; }
   .auth-field input { width: 100%; padding: 10px 12px; border-radius: 7px; border: 1px solid var(--border); font-size: 14px; }
@@ -176,6 +181,18 @@
 
   .modal-overlay { position: fixed; inset: 0; background: rgba(28,37,48,0.55); display: none; align-items: center; justify-content: center; z-index: 250; padding: 16px; }
   .modal-overlay.open { display: flex; }
+  /* Printing (labels / shelf QR codes) renders into this in-page container
+     rather than a popup window — window.open() doesn't work inside the
+     native app's WKWebView, which has no concept of a second browser
+     window to spawn. This approach works in both a real browser and the
+     native app shell. */
+  #printRoot { display: none; }
+  @media print {
+    body > *:not(#printRoot) { display: none !important; }
+    #printRoot { display: block !important; }
+  }
+  #rescueBody.collapsed { display: none; }
+  #rescueChevron.collapsed { transform: rotate(-90deg); }
   .modal { background: #fff; border-radius: 10px; width: 100%; max-width: 440px; max-height: 92vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
   .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--card-border); }
   .modal-title { font-family: 'Oswald', sans-serif; font-size: 17px; font-weight: 600; letter-spacing: 0.3px; }
@@ -531,17 +548,22 @@
       </div>
 
       <div id="rescueSection" style="display:none; background:#fff; border:1px solid var(--critical-band); border-radius:12px; padding:18px 20px; margin-bottom:18px;">
-        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+        <button type="button" id="rescueToggle" style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px; width:100%; background:none; border:none; padding:0; cursor:pointer; text-align:left;">
           <div style="font-family:'Oswald', sans-serif; font-size:14px; font-weight:600; letter-spacing:0.4px; color:var(--critical-text); display:flex; align-items:center; gap:7px;">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"/><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"/></svg>
             INVENTORY RESCUE
           </div>
-          <span id="rescueCount" style="font-size:12px; color:var(--muted);"></span>
+          <div style="display:flex; align-items:center; gap:8px;">
+            <span id="rescueCount" style="font-size:12px; color:var(--muted);"></span>
+            <svg id="rescueChevron" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="color:var(--muted); transition: transform 0.15s ease;"><path d="m6 9 6 6 6-6"/></svg>
+          </div>
+        </button>
+        <div id="rescueBody">
+          <p style="font-size:12.5px; color:var(--muted-2); margin: 6px 0 14px;">
+            These are closest to expiring and still have a real chance to sell instead of going to waste.
+          </p>
+          <div id="rescueList" style="display:flex; flex-direction:column; gap:10px;"></div>
         </div>
-        <p style="font-size:12.5px; color:var(--muted-2); margin: 6px 0 14px;">
-          These are closest to expiring and still have a real chance to sell instead of going to waste.
-        </p>
-        <div id="rescueList" style="display:flex; flex-direction:column; gap:10px;"></div>
       </div>
 
       <div class="dash-wrap" id="dashWrap">
@@ -980,7 +1002,7 @@
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
         </button>
       </div>
-      <div class="auth-tabs" style="margin: 14px 18px 0;">
+      <div class="auth-tabs manage-tabs" style="margin: 14px 18px 0;">
         <button class="auth-tab active" id="mgrTabWorkers">Workers</button>
         <button class="auth-tab" id="mgrTabCategories">Categories</button>
         <button class="auth-tab" id="mgrTabAlerts">Alerts</button>
@@ -1065,6 +1087,16 @@
           <div class="auth-field">
             <label>Assign to</label>
             <select class="field-input" id="newTaskAssignee"></select>
+          </div>
+          <div style="display:flex; gap:10px;">
+            <div class="auth-field" style="flex:1;">
+              <label>Due date (optional)</label>
+              <input type="date" id="newTaskDueDate">
+            </div>
+            <div class="auth-field" style="flex:1;">
+              <label>Due time (optional)</label>
+              <input type="time" id="newTaskDueTime">
+            </div>
           </div>
           <button type="submit" class="add-worker-btn">Assign</button>
         </form>
@@ -1761,12 +1793,19 @@
       return;
     }
     emptyEl.style.display = 'none';
-    listEl.innerHTML = tasks.map(t => `
+    listEl.innerHTML = tasks.map(t => {
+      const due = t.status === 'open' ? taskDueMeta(t.dueAt) : null;
+      const dueColor = due ? (due.overdue ? 'var(--expired-band)' : (due.dueSoon ? 'var(--critical-band)' : 'var(--muted)')) : '';
+      return `
       <div class="location-row ${t.status === 'done' ? 'current' : ''}" style="cursor:default;">
-        <span style="${t.status === 'done' ? 'text-decoration:line-through; opacity:0.7;' : ''}">${esc(t.title)}</span>
+        <span style="${t.status === 'done' ? 'text-decoration:line-through; opacity:0.7;' : ''}">
+          ${esc(t.title)}
+          ${due ? `<div class="loc-addr" style="color:${dueColor}; font-weight:${due.overdue ? '700' : '400'};">${esc(due.label)}</div>` : ''}
+        </span>
         <button type="button" class="add-worker-btn" data-toggle-task="${t.id}" style="padding:6px 12px; font-size:12px; width:auto;">${t.status === 'done' ? 'Reopen' : 'Done'}</button>
       </div>
-    `).join('');
+    `;
+    }).join('');
     listEl.querySelectorAll('[data-toggle-task]').forEach(btn => {
       btn.addEventListener('click', () => toggleTask(btn.dataset.toggleTask, true));
     });
@@ -1803,11 +1842,15 @@
       }
       emptyEl.style.display = 'none';
       const workerName = (id) => (workers.find(w => w.id === id) || {}).username || 'Unknown';
-      listEl.innerHTML = tasks.map(t => `
+      listEl.innerHTML = tasks.map(t => {
+        const due = t.status === 'open' ? taskDueMeta(t.dueAt) : null;
+        const dueColor = due ? (due.overdue ? 'var(--expired-band)' : (due.dueSoon ? 'var(--critical-band)' : 'var(--muted)')) : '';
+        return `
         <div class="location-row ${t.status === 'done' ? 'current' : ''}" style="cursor:default; flex-wrap:wrap;">
           <span style="${t.status === 'done' ? 'text-decoration:line-through; opacity:0.7;' : ''}">
             ${esc(t.title)}
             <div class="loc-addr">Assigned to ${esc(workerName(t.assignedTo))}</div>
+            ${due ? `<div class="loc-addr" style="color:${dueColor}; font-weight:${due.overdue ? '700' : '400'};">${esc(due.label)}</div>` : ''}
           </span>
           <div style="display:flex; gap:6px;">
             <button type="button" class="add-worker-btn" data-toggle-task="${t.id}" style="padding:6px 12px; font-size:12px; width:auto;">${t.status === 'done' ? 'Reopen' : 'Done'}</button>
@@ -1816,7 +1859,8 @@
             </button>
           </div>
         </div>
-      `).join('');
+      `;
+      }).join('');
       listEl.querySelectorAll('[data-toggle-task]').forEach(btn => {
         btn.addEventListener('click', () => toggleTask(btn.dataset.toggleTask, false));
       });
@@ -1841,6 +1885,8 @@
     const errEl = document.getElementById('newTaskError');
     const title = document.getElementById('newTaskTitle').value.trim();
     const assignedTo = document.getElementById('newTaskAssignee').value;
+    const dueDate = document.getElementById('newTaskDueDate').value || null;
+    const dueTime = document.getElementById('newTaskDueTime').value || null;
     if (!title) {
       errEl.textContent = 'Enter what needs to be done.';
       errEl.style.display = 'block';
@@ -1851,12 +1897,19 @@
       errEl.style.display = 'block';
       return;
     }
+    if (dueTime && !dueDate) {
+      errEl.textContent = 'Add a due date to go with that time, or clear the time.';
+      errEl.style.display = 'block';
+      return;
+    }
     try {
       await apiRequest('/api/tasks', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, assignedTo }),
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, assignedTo, dueDate, dueTime }),
       });
       errEl.style.display = 'none';
       document.getElementById('newTaskTitle').value = '';
+      document.getElementById('newTaskDueDate').value = '';
+      document.getElementById('newTaskDueTime').value = '';
       showToast('Task assigned');
       loadTasksPane();
     } catch (err) {
@@ -2407,21 +2460,27 @@
     return 'CODE128'; // handles "No barcode" placeholder codes and anything non-standard
   }
 
+  function ensurePrintRoot() {
+    let root = document.getElementById('printRoot');
+    if (!root) {
+      root = document.createElement('div');
+      root.id = 'printRoot';
+      document.body.appendChild(root);
+    }
+    return root;
+  }
+
   function printLabels(itemsToLabel) {
     if (!itemsToLabel || itemsToLabel.length === 0) {
       showToast('Nothing to print');
       return;
     }
-    const win = window.open('', '_blank');
-    if (!win) {
-      showToast('Pop-up blocked \u2014 allow pop-ups for this site to print labels');
-      return;
-    }
+    const root = ensurePrintRoot();
 
     const labelsHtml = itemsToLabel.map((it, i) => `
       <div class="label">
         <div class="label-name">${esc(it.name)}</div>
-        <svg class="label-barcode" id="barcode-${i}"></svg>
+        <svg class="label-barcode" id="printBarcode-${i}"></svg>
         <div class="label-row">
           <span>${it.sellingPrice ? '$' + Number(it.sellingPrice).toFixed(2) : ''}</span>
           <span>Exp: ${esc(formatDate(it.expirationDate))}</span>
@@ -2429,40 +2488,30 @@
       </div>
     `).join('');
 
-    win.document.write(`<!DOCTYPE html>
-<html>
-<head>
-<title>FloorStock Labels</title>
-<script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"><\/script>
-<style>
-  body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
-  .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
-  .label { border: 1px dashed #999; border-radius: 6px; padding: 8px; text-align: center; page-break-inside: avoid; }
-  .label-name { font-size: 12px; font-weight: 700; margin-bottom: 4px; height: 30px; overflow: hidden; line-height: 1.25; }
-  .label-barcode { width: 100%; height: auto; }
-  .label-row { display: flex; justify-content: space-between; font-size: 11px; margin-top: 2px; color: #333; }
-  @media print { .label { border: 1px solid #ccc; } }
-</style>
-</head>
-<body>
-  <div class="label-grid">${labelsHtml}</div>
-</body>
-</html>`);
-    win.document.close();
+    root.innerHTML = `
+      <style>
+        #printRoot .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+        #printRoot .label { border: 1px dashed #999; border-radius: 6px; padding: 8px; text-align: center; page-break-inside: avoid; }
+        #printRoot .label-name { font-size: 12px; font-weight: 700; margin-bottom: 4px; height: 30px; overflow: hidden; line-height: 1.25; }
+        #printRoot .label-barcode { width: 100%; height: auto; }
+        #printRoot .label-row { display: flex; justify-content: space-between; font-size: 11px; margin-top: 2px; color: #333; }
+        @media print { #printRoot .label { border: 1px solid #ccc; } }
+      </style>
+      <div class="label-grid">${labelsHtml}</div>
+    `;
 
-    win.onload = () => {
-      itemsToLabel.forEach((it, i) => {
-        const el = win.document.getElementById('barcode-' + i);
+    itemsToLabel.forEach((it, i) => {
+      const el = document.getElementById('printBarcode-' + i);
+      try {
+        JsBarcode(el, it.upc, { format: barcodeFormatFor(it.upc), displayValue: true, fontSize: 12, height: 40, margin: 4 });
+      } catch (e) {
         try {
-          win.JsBarcode(el, it.upc, { format: barcodeFormatFor(it.upc), displayValue: true, fontSize: 12, height: 40, margin: 4 });
-        } catch (e) {
-          try {
-            win.JsBarcode(el, it.upc, { format: 'CODE128', displayValue: true, fontSize: 12, height: 40, margin: 4 });
-          } catch (e2) { /* if even CODE128 fails on this value, leave the label without a barcode graphic */ }
-        }
-      });
-      setTimeout(() => win.print(), 300);
-    };
+          JsBarcode(el, it.upc, { format: 'CODE128', displayValue: true, fontSize: 12, height: 40, margin: 4 });
+        } catch (e2) { /* if even CODE128 fails on this value, leave the label without a barcode graphic */ }
+      }
+    });
+
+    setTimeout(() => window.print(), 200);
   }
 
   document.getElementById('printLabelsBtn').addEventListener('click', () => {
@@ -2517,60 +2566,45 @@
       showToast('Nothing to print');
       return;
     }
-    const win = window.open('', '_blank');
-    if (!win) {
-      showToast('Pop-up blocked \u2014 allow pop-ups for this site to print labels');
-      return;
-    }
+    const root = ensurePrintRoot();
 
     const labelsHtml = locations.map((loc, i) => `
       <div class="shelf-label">
-        <canvas id="qr-${i}"></canvas>
+        <canvas id="printQr-${i}"></canvas>
         <div class="shelf-label-name">${esc(loc)}</div>
         <div class="shelf-label-sub">Scan for what's expiring here</div>
       </div>
     `).join('');
 
-    win.document.write(`<!DOCTYPE html>
-<html>
-<head>
-<title>FloorStock Shelf QR Labels</title>
-<script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.3/build/qrcode.min.js"><\/script>
-<style>
-  body { font-family: Arial, Helvetica, sans-serif; margin: 0; padding: 14px; }
-  .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
-  .shelf-label { border: 1px dashed #999; border-radius: 6px; padding: 12px 8px; text-align: center; page-break-inside: avoid; }
-  .shelf-label canvas { width: 100%; height: auto; max-width: 140px; }
-  .shelf-label-name { font-size: 13px; font-weight: 700; margin-top: 6px; }
-  .shelf-label-sub { font-size: 10px; color: #666; margin-top: 2px; }
-  @media print { .shelf-label { border: 1px solid #ccc; } }
-</style>
-</head>
-<body>
-  <div class="label-grid">${labelsHtml}</div>
-</body>
-</html>`);
-    win.document.close();
+    root.innerHTML = `
+      <style>
+        #printRoot .label-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+        #printRoot .shelf-label { border: 1px dashed #999; border-radius: 6px; padding: 12px 8px; text-align: center; page-break-inside: avoid; }
+        #printRoot .shelf-label canvas { width: 100%; height: auto; max-width: 140px; }
+        #printRoot .shelf-label-name { font-size: 13px; font-weight: 700; margin-top: 6px; }
+        #printRoot .shelf-label-sub { font-size: 10px; color: #666; margin-top: 2px; }
+        @media print { #printRoot .shelf-label { border: 1px solid #ccc; } }
+      </style>
+      <div class="label-grid">${labelsHtml}</div>
+    `;
 
-    win.onload = () => {
-      let remaining = locations.length;
-      const triggerPrintWhenDone = () => {
-        remaining--;
-        if (remaining <= 0) setTimeout(() => win.print(), 150);
-      };
-      locations.forEach((loc, i) => {
-        const canvas = win.document.getElementById('qr-' + i);
-        try {
-          // toCanvas is asynchronous — printing before it resolves would
-          // capture a blank canvas, so wait for its callback before printing.
-          win.QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, () => {
-            triggerPrintWhenDone();
-          });
-        } catch (e) {
-          triggerPrintWhenDone(); // still let the rest print even if one code fails
-        }
-      });
+    let remaining = locations.length;
+    const triggerPrintWhenDone = () => {
+      remaining--;
+      if (remaining <= 0) setTimeout(() => window.print(), 150);
     };
+    locations.forEach((loc, i) => {
+      const canvas = document.getElementById('printQr-' + i);
+      try {
+        // toCanvas is asynchronous — printing before it resolves would
+        // capture a blank canvas, so wait for its callback before printing.
+        QRCode.toCanvas(canvas, shelfUrlFor(loc), { width: 160, margin: 1 }, () => {
+          triggerPrintWhenDone();
+        });
+      } catch (e) {
+        triggerPrintWhenDone(); // still let the rest print even if one code fails
+      }
+    });
   }
 
   // If the page was opened from a shelf QR label, filter straight to that
@@ -2887,6 +2921,29 @@
     if (d === 0) return 'Today';
     if (d === 1) return '1 day left';
     return d + ' days left';
+  }
+
+  // Tasks store due_at as "YYYY-MM-DDTHH:MM:00" with no timezone suffix
+  // (parsed as local time, same convention as the rest of the app). When no
+  // specific time was given, the server fills in 23:59 as an "end of that
+  // day" sentinel — treated here as date-only so the person doesn't see a
+  // misleading "11:59 PM" on a task that was never given a real time.
+  function taskDueMeta(dueAt) {
+    if (!dueAt) return null;
+    const due = new Date(dueAt);
+    const now = new Date();
+    const hasTime = !dueAt.endsWith('23:59:00');
+    const dateLabel = due.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    const timeLabel = hasTime ? due.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' }) : '';
+    const overdue = due < now;
+    const sameDay = due.toDateString() === now.toDateString();
+    let label;
+    if (overdue) {
+      label = 'Overdue \u2014 was due ' + dateLabel + (timeLabel ? ' at ' + timeLabel : '');
+    } else {
+      label = (sameDay ? 'Due today' : 'Due ' + dateLabel) + (timeLabel ? ' at ' + timeLabel : '');
+    }
+    return { overdue, label, dueSoon: !overdue && (due - now) < 24 * 60 * 60 * 1000 };
   }
   function locationPin() {
     return `<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-1px;"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>`;
@@ -3284,6 +3341,20 @@
   }
 
   // ---------- inventory rescue ----------
+  // Collapsed by default — persisted per-device so it doesn't reset every
+  // visit once the person picks a preference.
+  const RESCUE_COLLAPSE_KEY = 'floorstock_rescue_collapsed';
+  function applyRescueCollapseState() {
+    const collapsed = localStorage.getItem(RESCUE_COLLAPSE_KEY) !== 'false'; // default: collapsed
+    document.getElementById('rescueBody').classList.toggle('collapsed', collapsed);
+    document.getElementById('rescueChevron').classList.toggle('collapsed', collapsed);
+  }
+  document.getElementById('rescueToggle').addEventListener('click', () => {
+    const nowCollapsed = !document.getElementById('rescueBody').classList.contains('collapsed');
+    localStorage.setItem(RESCUE_COLLAPSE_KEY, String(nowCollapsed));
+    applyRescueCollapseState();
+  });
+
   function renderRescueSection() {
     const section = document.getElementById('rescueSection');
     const candidates = items
@@ -3297,6 +3368,7 @@
       return;
     }
     section.style.display = 'block';
+    applyRescueCollapseState();
     document.getElementById('rescueCount').textContent = `${candidates.length} item${candidates.length !== 1 ? 's' : ''}`;
 
     const shown = candidates.slice(0, 6);

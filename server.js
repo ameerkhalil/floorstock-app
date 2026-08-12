@@ -263,6 +263,9 @@ if (!itemCols.includes('vendor')) db.exec("ALTER TABLE items ADD COLUMN vendor T
 const removalCols = db.prepare("PRAGMA table_info(removals)").all().map(c => c.name);
 if (!removalCols.includes('vendor')) db.exec("ALTER TABLE removals ADD COLUMN vendor TEXT");
 
+const taskCols = db.prepare("PRAGMA table_info(tasks)").all().map(c => c.name);
+if (!taskCols.includes('due_at')) db.exec("ALTER TABLE tasks ADD COLUMN due_at TEXT");
+
 const salesCols = db.prepare("PRAGMA table_info(sales)").all().map(c => c.name);
 if (!salesCols.includes('vendor')) db.exec("ALTER TABLE sales ADD COLUMN vendor TEXT");
 if (!salesCols.includes('category_id')) db.exec("ALTER TABLE sales ADD COLUMN category_id TEXT");
@@ -750,6 +753,7 @@ function rowToTask(row) {
     status: row.status,
     createdAt: row.created_at,
     completedAt: row.completed_at || null,
+    dueAt: row.due_at || null,
   };
 }
 
@@ -764,16 +768,27 @@ app.get('/api/tasks/mine', requireAuth, requireActiveSubscription, (req, res) =>
 });
 
 app.post('/api/tasks', requireManager, (req, res) => {
-  const { title, assignedTo } = req.body || {};
+  const { title, assignedTo, dueDate, dueTime } = req.body || {};
   if (!title || !String(title).trim()) return res.status(400).json({ error: 'A task title is required.' });
   if (!assignedTo || !String(assignedTo).trim()) return res.status(400).json({ error: 'Pick who this is assigned to.' });
 
   const worker = db.prepare('SELECT username FROM users WHERE id = ? AND store_id = ?').get(assignedTo, req.auth.storeId);
   if (!worker) return res.status(400).json({ error: 'That person isn\u2019t part of this store.' });
 
+  let dueAt = null;
+  if (dueDate) {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(dueDate)) return res.status(400).json({ error: 'That due date doesn\u2019t look right.' });
+    let time = '23:59'; // no time given — treat the due date as "by end of that day"
+    if (dueTime) {
+      if (!/^\d{2}:\d{2}$/.test(dueTime)) return res.status(400).json({ error: 'That due time doesn\u2019t look right.' });
+      time = dueTime;
+    }
+    dueAt = `${dueDate}T${time}:00`;
+  }
+
   const id = newId();
-  db.prepare('INSERT INTO tasks (id, store_id, title, assigned_to, assigned_by, status, created_at) VALUES (?, ?, ?, ?, ?, \'open\', ?)')
-    .run(id, req.auth.storeId, title.trim(), assignedTo, currentUsername(req), nowIso());
+  db.prepare('INSERT INTO tasks (id, store_id, title, assigned_to, assigned_by, status, created_at, due_at) VALUES (?, ?, ?, ?, ?, \'open\', ?, ?)')
+    .run(id, req.auth.storeId, title.trim(), assignedTo, currentUsername(req), nowIso(), dueAt);
 
   logAudit(req.auth.storeId, currentUsername(req), 'task_assigned', `Assigned "${title.trim()}" to ${worker.username}`);
 
