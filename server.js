@@ -376,6 +376,7 @@ const pendingItemCols = db.prepare("PRAGMA table_info(pending_items)").all().map
 if (!pendingItemCols.includes('cost_price')) db.exec("ALTER TABLE pending_items ADD COLUMN cost_price REAL");
 if (!pendingItemCols.includes('vendor')) db.exec("ALTER TABLE pending_items ADD COLUMN vendor TEXT");
 if (!pendingItemCols.includes('default_quantity')) db.exec("ALTER TABLE pending_items ADD COLUMN default_quantity REAL");
+if (!pendingItemCols.includes('suggested_expiration_date')) db.exec("ALTER TABLE pending_items ADD COLUMN suggested_expiration_date TEXT");
 
 // ---------- Stripe webhook (needs the RAW body for signature verification,
 // so this is registered before express.json() touches the request) ----------
@@ -1827,6 +1828,7 @@ function rowToPendingItem(row) {
     costPrice: row.cost_price === null || row.cost_price === undefined ? null : row.cost_price,
     vendor: row.vendor || null,
     defaultQuantity: row.default_quantity === null || row.default_quantity === undefined ? null : row.default_quantity,
+    suggestedExpirationDate: row.suggested_expiration_date || null,
   };
 }
 
@@ -1917,11 +1919,15 @@ async function extractInvoiceLineItems(base64Data, mediaType) {
           contentBlock,
           {
             type: 'text',
-            text: 'This is a vendor invoice or receipt for a convenience store. Extract every product line item. ' +
+              text: 'This is a vendor invoice or receipt for a convenience store. Extract every product line item. ' +
               'Respond with ONLY a JSON object, no other text, no markdown fences, in exactly this shape: ' +
-              '{"vendor": "string or null", "lineItems": [{"name": "string", "quantity": number or null, "unitCost": number or null}]}. ' +
+              '{"vendor": "string or null", "lineItems": [{"name": "string", "quantity": number or null, "unitCost": number or null, "expirationDate": "YYYY-MM-DD or null"}]}. ' +
               'Do not include tax, subtotal, total, discount, or shipping lines as line items. ' +
-              'If the vendor name isn\u2019t clearly printed, use null rather than guessing.',
+              'If the vendor name isn\u2019t clearly printed, use null rather than guessing. ' +
+              'Most invoices do NOT print expiration dates \u2014 leave expirationDate as null unless one is actually ' +
+              'printed for that specific line (e.g. a "best by", "exp", or "sell by" date/code next to the item). ' +
+              'Never calculate or estimate an expiration date yourself from a pack date, order date, or typical shelf ' +
+              'life \u2014 only report a date if it is literally printed on the invoice for that item.',
           },
         ],
       }],
@@ -1969,9 +1975,23 @@ app.post('/api/invoices/import', requireManager, async (req, res) => {
 
   const vendor = extracted.vendor ? String(extracted.vendor).trim().slice(0, 200) : null;
   const insertPending = db.prepare(`
-    INSERT INTO pending_items (id, store_id, upc, name, size_value, size_unit, scanned_by, scanned_at, cost_price, vendor, default_quantity)
-    VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?)
+    INSERT INTO pending_items (id, store_id, upc, name, size_value, size_unit, scanned_by, scanned_at, cost_price, vendor, default_quantity, suggested_expiration_date)
+    VALUES (?, ?, ?, ?, NULL, NULL, ?, ?, ?, ?, ?, ?)
   `);
+
+  // Validated defensively since this comes from an AI extraction, not a
+  // person: must be a real, plausible calendar date reasonably close to
+  // today (an invoice line shouldn't be printing a date from 1990 or 2090)
+  // before it's trusted enough to pre-fill anywhere.
+  function validPrintedExpirationDate(raw) {
+    if (!raw || typeof raw !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(raw)) return null;
+    const d = new Date(raw + 'T00:00:00Z');
+    if (Number.isNaN(d.getTime())) return null;
+    const now = Date.now();
+    const tenYearsMs = 10 * 365 * 24 * 60 * 60 * 1000;
+    if (d.getTime() < now - tenYearsMs || d.getTime() > now + tenYearsMs) return null;
+    return raw;
+  }
 
   const created = [];
   for (const li of lineItems) {
@@ -1979,6 +1999,7 @@ app.post('/api/invoices/import', requireManager, async (req, res) => {
     if (!name) continue;
     const quantity = Number(li.quantity);
     const unitCost = Number(li.unitCost);
+    const suggestedExpirationDate = validPrintedExpirationDate(li.expirationDate);
     const id = newId();
     const placeholderUpc = `NOUPC-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
     insertPending.run(
@@ -1986,7 +2007,8 @@ app.post('/api/invoices/import', requireManager, async (req, res) => {
       currentUsername(req), nowIso(),
       Number.isFinite(unitCost) && unitCost >= 0 ? unitCost : null,
       vendor,
-      Number.isFinite(quantity) && quantity >= 0 ? quantity : null
+      Number.isFinite(quantity) && quantity >= 0 ? quantity : null,
+      suggestedExpirationDate
     );
     created.push(rowToPendingItem(db.prepare('SELECT * FROM pending_items WHERE id = ?').get(id)));
   }

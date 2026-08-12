@@ -727,6 +727,7 @@
         <div>
           <label class="field-label" data-i18n="batches_label">Batches</label>
           <div id="batchRows"></div>
+          <div id="expirationAutoNote" style="display:none; font-size:12px; color:var(--ok-text); margin-top:6px;"></div>
           <button type="button" id="addBatchRowBtn" style="margin-top:6px; background:none; border:none; color:var(--accent); font-size:12.5px; font-weight:600; padding:4px 0; display:flex; align-items:center; gap:4px;">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14"/><path d="M12 5v14"/></svg>
             <span data-i18n="add_another_date">Add another expiration date</span>
@@ -965,8 +966,9 @@
         <p style="font-size:13px; color:var(--muted-2); line-height:1.6; margin-top:0;">
           Upload a photo or PDF of a vendor invoice. Each line item gets queued as a
           pending scan for you to review &mdash; nothing is added to your floor stock
-          automatically. Expiration dates aren't printed on invoices, so you'll fill
-          those in yourself for each item, same as completing a bulk scan.
+          automatically. If an expiration date is actually printed on the invoice
+          we'll fill it in for you; otherwise you'll add it yourself, same as
+          completing a bulk scan.
         </p>
         <div class="auth-field">
           <label>Invoice photo or PDF</label>
@@ -4302,7 +4304,7 @@
     document.getElementById('noUpcCheckbox').checked = false;
     document.getElementById('noUpcCheckbox').closest('label').style.display = 'none';
     document.getElementById('nameInput').value = pending.name || '';
-    resetBatchRows('', pending.defaultQuantity !== null && pending.defaultQuantity !== undefined ? pending.defaultQuantity : '', true);
+    resetBatchRows(pending.suggestedExpirationDate || '', pending.defaultQuantity !== null && pending.defaultQuantity !== undefined ? pending.defaultQuantity : '', true);
     document.getElementById('unitInput').value = 'each';
     document.getElementById('locInput').value = '';
     populateLocationDatalist();
@@ -4851,11 +4853,15 @@
         p.vendor ? esc(p.vendor) : '',
         p.costPrice !== null && p.costPrice !== undefined ? `cost $${Number(p.costPrice).toFixed(2)}` : '',
       ].filter(Boolean).join(' \u00b7 ');
+      const expLine = p.suggestedExpirationDate
+        ? `<div style="color:var(--ok-text); font-size:11.5px; margin-top:2px; font-weight:600;">Exp ${esc(formatDate(p.suggestedExpirationDate))} \u2014 detected from invoice</div>`
+        : '';
       return `
       <div style="display:flex; align-items:center; justify-content:space-between; background:var(--surface); border-radius:8px; padding:10px 12px; gap:10px;">
         <div style="min-width:0;">
           <div style="font-weight:600; font-size:13.5px;">${esc(p.name || 'Unrecognized product')}</div>
           <div class="mono" style="color:var(--muted); font-size:11.5px; margin-top:2px;">${esc(upcLabel)}${extras ? ` \u00b7 ${extras}` : ''}</div>
+          ${expLine}
         </div>
         <div class="tag-actions" style="margin-top:0; border-top:none; padding-top:0; flex-shrink:0;">
           <button type="button" class="edit-btn" data-complete-id="${p.id}">Complete</button>
