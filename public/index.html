@@ -14,7 +14,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.21.3/umd/index.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/[email protected]/umd/zxing-browser.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@zxing/browser/umd/zxing-browser.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/jsbarcode@3.11.5/dist/JsBarcode.all.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/qrcode/build/qrcode.min.js"></script>
 <style>
@@ -3956,7 +3956,10 @@
     errEl.style.display = 'none';
 
     if (typeof ZXing === 'undefined' || typeof ZXingBrowser === 'undefined') {
-      errEl.textContent = 'Scanner failed to load \u2014 check your connection, or enter the UPC manually below.';
+      const missing = [];
+      if (typeof ZXing === 'undefined') missing.push('@zxing/library');
+      if (typeof ZXingBrowser === 'undefined') missing.push('@zxing/browser');
+      errEl.textContent = 'Scanner failed to load (' + missing.join(', ') + ' didn\u2019t load) \u2014 check your connection, or enter the UPC manually below.';
       errEl.style.display = 'block';
       return;
     }
