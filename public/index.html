@@ -5055,6 +5055,27 @@
     modalScrollObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
   });
 
+  // TEMPORARY DIAGNOSTIC — shows live scroll metrics for whichever modal is
+  // currently open, so we can see exactly what the browser thinks is
+  // happening instead of guessing. Remove once the scan-scroll issue is
+  // actually diagnosed.
+  (function attachScrollDiag() {
+    const diag = document.createElement('div');
+    diag.id = 'scrollDiagBanner';
+    diag.style.cssText = 'position:fixed; bottom:70px; left:8px; right:8px; z-index:999999; background:#000; color:#0f0; font-family:monospace; font-size:10.5px; padding:8px; border-radius:6px; line-height:1.5; pointer-events:none;';
+    document.body.appendChild(diag);
+    function update() {
+      const modal = document.querySelector('.modal-overlay.open .modal');
+      if (!modal) { diag.textContent = 'no modal open'; return; }
+      const canScrollMore = modal.scrollHeight - modal.clientHeight - modal.scrollTop;
+      diag.textContent = `modal scrollTop=${modal.scrollTop} scrollHeight=${modal.scrollHeight} clientHeight=${modal.clientHeight} remaining=${canScrollMore} bodyModalOpen=${document.body.classList.contains('modal-open')}`;
+    }
+    document.addEventListener('touchmove', update, { passive: true, capture: true });
+    document.addEventListener('scroll', update, { passive: true, capture: true });
+    setInterval(update, 400);
+    update();
+  })();
+
   checkExistingSession();
 })();
 </script>
