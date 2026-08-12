@@ -37,6 +37,15 @@ const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || '').trim().toLowerCase();
 // Costs a small amount per invoice processed; see README for an estimate.
 const ANTHROPIC_API_KEY = process.env.ANTHROPIC_API_KEY || '';
 
+// Push notifications (optional — simply won't send without these). Uses
+// OneSignal rather than talking to Apple's push service directly, since
+// OneSignal's REST API is a single HTTP call with two static credentials,
+// versus raw APNs which needs per-request JWT signing with a .p8 key.
+// Sign up free at onesignal.com, create an iOS push app there (it'll walk
+// you through uploading your Apple Push key), then set these two values.
+const ONESIGNAL_APP_ID = process.env.ONESIGNAL_APP_ID || '';
+const ONESIGNAL_REST_API_KEY = process.env.ONESIGNAL_REST_API_KEY || '';
+
 // Make sure the database's directory exists (e.g. a Render disk mount path
 // like /data) before trying to open it — otherwise better-sqlite3 throws and
 // the whole server crashes on boot instead of starting.
@@ -150,6 +159,25 @@ db.exec(`
     sent_date TEXT NOT NULL,
     created_at TEXT NOT NULL,
     PRIMARY KEY (store_id, sent_date)
+  );
+
+  -- One row per device that has granted push permission. A person can be
+  -- signed in on more than one device (phone + a shared tablet up front),
+  -- so this is keyed by token, not by user.
+  CREATE TABLE IF NOT EXISTS push_tokens (
+    token TEXT PRIMARY KEY,
+    user_id TEXT NOT NULL,
+    store_id TEXT NOT NULL,
+    platform TEXT,
+    created_at TEXT NOT NULL
+  );
+
+  -- Dedup log for scheduled (non-instant) pushes, so a hookup that runs
+  -- hourly doesn't re-notify about the same overdue task or the same
+  -- overnight-expired item every single hour it stays true.
+  CREATE TABLE IF NOT EXISTS push_notify_log (
+    dedup_key TEXT PRIMARY KEY,
+    sent_at TEXT NOT NULL
   );
 
   -- Shared across every store: once any store's scan successfully identifies a
@@ -791,6 +819,10 @@ app.post('/api/tasks', requireManager, (req, res) => {
     .run(id, req.auth.storeId, title.trim(), assignedTo, currentUsername(req), nowIso(), dueAt);
 
   logAudit(req.auth.storeId, currentUsername(req), 'task_assigned', `Assigned "${title.trim()}" to ${worker.username}`);
+
+  // Fire-and-forget — the task is already saved either way, so a slow or
+  // failed push shouldn't delay or break the response to the manager.
+  sendPushToUser(assignedTo, 'New task assigned', title.trim(), { data: { screen: 'tasks', taskId: id } }).catch(() => {});
 
   const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
   res.status(201).json(rowToTask(row));
@@ -2061,6 +2093,70 @@ async function sendEmail({ to, subject, html, attachments }) {
   }
 }
 
+// ---------- push notifications ----------
+// Sends to every device the given user has registered. badge (optional) sets
+// the app icon's number badge on iOS — pass the person's open-task count (or
+// omit it to leave the badge untouched). data (optional) is delivered to the
+// app for deep-linking (e.g. { screen: 'task', taskId }).
+async function sendPushToUser(userId, title, body, { badge, data } = {}) {
+  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return { sent: false, reason: 'not configured' };
+  const tokens = db.prepare('SELECT token FROM push_tokens WHERE user_id = ?').all(userId).map(r => r.token);
+  if (tokens.length === 0) return { sent: false, reason: 'no registered devices' };
+
+  try {
+    const payload = {
+      app_id: ONESIGNAL_APP_ID,
+      include_player_ids: tokens, // "player_id" is OneSignal's name for a registered device token
+      headings: { en: title },
+      contents: { en: body },
+    };
+    if (Number.isFinite(badge)) { payload.ios_badgeType = 'SetTo'; payload.ios_badgeCount = badge; }
+    if (data) payload.data = data;
+
+    const response = await fetch('https://onesignal.com/api/v1/notifications', {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${ONESIGNAL_REST_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    if (!response.ok) {
+      const errBody = await response.text().catch(() => '');
+      return { sent: false, reason: `push API error: ${response.status} ${errBody}` };
+    }
+    return { sent: true };
+  } catch (e) {
+    return { sent: false, reason: e.message };
+  }
+}
+
+// For scheduled (non-instant) pushes only — an instant push like "task
+// assigned to you" should always fire, but a hookup that re-checks every
+// hour (overdue tasks, overnight-expired items) needs to dedupe so the
+// person isn't renotified every single hour the condition stays true.
+function pushAlreadySentToday(dedupKey) {
+  const today = todayUtcDateStr();
+  const key = `${dedupKey}:${today}`;
+  const already = db.prepare('SELECT 1 FROM push_notify_log WHERE dedup_key = ?').get(key);
+  if (already) return true;
+  db.prepare('INSERT OR IGNORE INTO push_notify_log (dedup_key, sent_at) VALUES (?, ?)').run(key, nowIso());
+  return false;
+}
+
+app.post('/api/push/register', requireAuth, (req, res) => {
+  const { token, platform } = req.body || {};
+  if (!token || !String(token).trim()) return res.status(400).json({ error: 'A device token is required.' });
+  db.prepare(`
+    INSERT INTO push_tokens (token, user_id, store_id, platform, created_at) VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, store_id = excluded.store_id, platform = excluded.platform
+  `).run(token.trim(), req.auth.userId, req.auth.storeId, platform || null, nowIso());
+  res.status(201).json({ registered: true });
+});
+
+app.post('/api/push/unregister', requireAuth, (req, res) => {
+  const { token } = req.body || {};
+  if (token) db.prepare('DELETE FROM push_tokens WHERE token = ? AND user_id = ?').run(token, req.auth.userId);
+  res.status(204).end();
+});
+
 async function sendDigestEmail(store, toEmail, alertItems) {
   const org = db.prepare('SELECT critical_days, soon_days FROM organizations WHERE id = ?').get(store.organization_id);
   return sendEmail({
@@ -2151,6 +2247,82 @@ function runDigestCheckIfDue() {
   }
 }
 setInterval(runDigestCheckIfDue, 60 * 60 * 1000); // hourly check
+
+// ---------- scheduled push notifications ----------
+
+// Overdue tasks: checked hourly (unlike the once-a-day digest) so a task
+// due at 2pm gets flagged that afternoon, not the next morning. Dedup is
+// still day-scoped, so a task stuck overdue for a week only pings once per
+// day, not every hour.
+function runOverdueTaskPushCheck() {
+  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return;
+  const nowIsoStr = new Date().toISOString();
+  const overdue = db.prepare(`
+    SELECT * FROM tasks WHERE status = 'open' AND due_at IS NOT NULL AND due_at < ?
+  `).all(nowIsoStr.slice(0, 19));
+  for (const task of overdue) {
+    if (pushAlreadySentToday(`overdue-task:${task.id}`)) continue;
+    sendPushToUser(task.assigned_to, 'Task overdue', task.title).catch(() => {});
+  }
+}
+setInterval(runOverdueTaskPushCheck, 60 * 60 * 1000); // hourly check
+
+// Everything else (newly-expired items, inventory rescue candidates, trial
+// ending) only makes sense to check once a day — reuses the same hour as
+// the digest email so managers get one predictable daily check-in.
+function runDailyOpsPushCheck() {
+  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return;
+  const nowUtc = new Date();
+  if (nowUtc.getUTCHours() !== DIGEST_HOUR_UTC) return;
+
+  const today = todayUtcDateStr();
+  const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
+
+  const stores = db.prepare('SELECT * FROM stores').all();
+  for (const store of stores) {
+    const manager = db.prepare("SELECT * FROM users WHERE organization_id = ? AND role = 'manager' LIMIT 1").get(store.organization_id);
+    if (!manager) continue;
+
+    const org = db.prepare('SELECT critical_days, soon_days, trial_ends_at, subscription_status FROM organizations WHERE id = ?').get(store.organization_id);
+    const criticalDays = org ? org.critical_days : 3;
+    const soonDays = org ? org.soon_days : 60;
+    const allItems = db.prepare('SELECT * FROM items WHERE store_id = ?').all(store.id);
+
+    // Newly expired: items whose expiration date was exactly yesterday, i.e.
+    // they crossed into "expired" overnight rather than having been expired
+    // for a while already (which would otherwise re-notify every single day).
+    const newlyExpired = allItems.filter(it => it.expiration_date === yesterday);
+    if (newlyExpired.length > 0 && !pushAlreadySentToday(`expired:${store.id}`)) {
+      sendPushToUser(manager.id, `${newlyExpired.length} item${newlyExpired.length !== 1 ? 's' : ''} expired overnight`,
+        newlyExpired.slice(0, 3).map(it => it.name).join(', ') + (newlyExpired.length > 3 ? ', \u2026' : ''),
+        { data: { screen: 'home' } }).catch(() => {});
+    }
+
+    // Inventory rescue: items still worth marking down rather than writing
+    // off, same definition used by the in-app Inventory Rescue section.
+    const rescueCandidates = allItems.filter(it => {
+      if (!it.selling_price || it.quantity <= 0) return false;
+      const u = urgencyOf(it.expiration_date, criticalDays, soonDays);
+      return u === 'critical' || u === 'soon';
+    });
+    if (rescueCandidates.length > 0 && !pushAlreadySentToday(`rescue:${store.id}`)) {
+      sendPushToUser(manager.id, `${rescueCandidates.length} item${rescueCandidates.length !== 1 ? 's' : ''} worth marking down`,
+        'Still sellable if discounted soon \u2014 check Inventory Rescue.',
+        { data: { screen: 'home' } }).catch(() => {});
+    }
+
+    // Trial ending soon.
+    if (org && org.trial_ends_at && org.subscription_status === 'trialing') {
+      const daysLeft = Math.ceil((new Date(org.trial_ends_at).getTime() - Date.now()) / 86400000);
+      if (daysLeft >= 0 && daysLeft <= 3 && !pushAlreadySentToday(`trial:${store.organization_id}`)) {
+        sendPushToUser(manager.id, daysLeft === 0 ? 'Trial ends today' : `Trial ends in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
+          'Add billing to keep FloorStock running without interruption.',
+          { data: { screen: 'billing' } }).catch(() => {});
+      }
+    }
+  }
+}
+setInterval(runDailyOpsPushCheck, 60 * 60 * 1000); // hourly check (gates internally to once/day)
 
 // =====================================================================
 // AUTOMATED WEEKLY BACKUP EMAIL (per store — a portable copy of your data,

@@ -436,6 +436,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
           Export
         </button>
+        <button class="btn-ghost" id="syncOfflineBtn" style="display:none;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/></svg>
+          Sync offline items
+        </button>
         <button class="btn-ghost" id="printLabelsBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/></svg>
           Print labels
@@ -1219,6 +1223,76 @@
     return res.json();
   }
 
+  // ---------- offline queue (new items only) ----------
+  // Scoped deliberately narrow: only brand-new items created while offline
+  // get queued. Edits and pending-item completions are NOT queued here,
+  // since both need to know the item's current server-side state to apply
+  // safely — faking that offline risks silently overwriting someone else's
+  // more recent change once connectivity returns.
+  const OFFLINE_QUEUE_KEY = 'floorstock_offline_item_queue';
+  function getOfflineQueue() {
+    try { return JSON.parse(localStorage.getItem(OFFLINE_QUEUE_KEY) || '[]'); }
+    catch (e) { return []; }
+  }
+  function setOfflineQueue(queue) {
+    localStorage.setItem(OFFLINE_QUEUE_KEY, JSON.stringify(queue));
+    updateOfflineQueueBadge();
+  }
+  function queueOfflineItemCreate(data) {
+    const queue = getOfflineQueue();
+    queue.push({ localId: 'offline_' + Date.now() + '_' + Math.random().toString(36).slice(2), data, queuedAt: nowIsoLocal() });
+    setOfflineQueue(queue);
+  }
+  function nowIsoLocal() { return new Date().toISOString(); }
+
+  function updateOfflineQueueBadge() {
+    const count = getOfflineQueue().length;
+    const btn = document.getElementById('syncOfflineBtn');
+    if (!btn) return;
+    btn.style.display = count > 0 ? 'flex' : 'none';
+    btn.lastChild.textContent = count > 0 ? ` Sync offline items (${count})` : ' Sync offline items';
+  }
+
+  let flushingOfflineQueue = false;
+  async function flushOfflineQueue() {
+    if (flushingOfflineQueue) return;
+    const queue = getOfflineQueue();
+    if (queue.length === 0) return;
+    flushingOfflineQueue = true;
+    try {
+      let syncedCount = 0;
+      let i = 0;
+      for (; i < queue.length; i++) {
+        const entry = queue[i];
+        try {
+          const created = await apiRequest(API_BASE, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(entry.data),
+          });
+          items.push(created);
+          syncedCount++;
+        } catch (e) {
+          if (e.status === undefined) {
+            // still offline / can't reach the server — stop here, keep this
+            // entry and everything after it queued for the next attempt
+            break;
+          }
+          // A real server-side error (e.g. validation) — drop it rather than
+          // retry forever, since retrying won't fix a rejected payload.
+          showToast(`An offline item couldn\u2019t be saved: ${e.message}`);
+        }
+      }
+      setOfflineQueue(queue.slice(i));
+      if (syncedCount > 0) {
+        showToast(`Synced ${syncedCount} item${syncedCount !== 1 ? 's' : ''} saved while offline`);
+        renderAll();
+      }
+    } finally {
+      flushingOfflineQueue = false;
+    }
+  }
+  window.addEventListener('online', flushOfflineQueue);
+
+
   function esc(str) {
     const d = document.createElement('div'); d.textContent = str == null ? '' : String(str);
     return d.innerHTML;
@@ -1739,6 +1813,9 @@
     items.push({ id: 'bulkScanBtn', label: 'Bulk scan', icon: '<path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/>' });
     if (pendingItems.length > 0) {
       items.push({ id: 'pendingItemsBtn', label: 'Pending scans', icon: '<circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/>', badge: pendingItems.length });
+    }
+    if (getOfflineQueue().length > 0) {
+      items.push({ id: 'syncOfflineBtn', label: 'Sync offline items', icon: '<path d="M21 12a9 9 0 1 1-6.219-8.56"/><polyline points="21 3 21 9 15 9"/>', badge: getOfflineQueue().length });
     }
     items.push({ id: 'importBtn', label: 'Import inventory', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/>' });
     if (document.getElementById('invoiceImportBtn').style.display === 'flex') {
@@ -2447,6 +2524,16 @@
 
   document.getElementById('exportBtn').addEventListener('click', () => {
     window.location.href = '/api/items/export.csv';
+  });
+
+  document.getElementById('syncOfflineBtn').addEventListener('click', () => {
+    const count = getOfflineQueue().length;
+    if (count === 0) {
+      showToast('Nothing waiting to sync');
+      return;
+    }
+    showToast('Syncing\u2026');
+    flushOfflineQueue();
   });
 
   // =====================================================================
@@ -3762,20 +3849,41 @@
         showToast(batches.length > 1 ? `Added ${batches.length} batches to floor` : 'Added to floor');
       } else if (batches.length === 1) {
         const data = { ...sharedFields, expirationDate: batches[0].expirationDate, quantity: Number(batches[0].quantity) };
-        const created = await apiRequest(API_BASE, {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
-        });
-        items.push(created);
-        showToast('Tag added to floor');
-      } else {
-        for (const b of batches) {
-          const data = { ...sharedFields, expirationDate: b.expirationDate, quantity: Number(b.quantity) };
+        try {
           const created = await apiRequest(API_BASE, {
             method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
           });
           items.push(created);
+          showToast('Tag added to floor');
+        } catch (e) {
+          if (e.status === undefined) {
+            queueOfflineItemCreate(data);
+            showToast('No connection \u2014 saved offline, will upload automatically once you\u2019re back online');
+          } else {
+            throw e;
+          }
         }
-        showToast(`Added ${batches.length} batches to floor`);
+      } else {
+        let queuedAny = false;
+        for (const b of batches) {
+          const data = { ...sharedFields, expirationDate: b.expirationDate, quantity: Number(b.quantity) };
+          try {
+            const created = await apiRequest(API_BASE, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+            });
+            items.push(created);
+          } catch (e) {
+            if (e.status === undefined) {
+              queueOfflineItemCreate(data);
+              queuedAny = true;
+            } else {
+              throw e;
+            }
+          }
+        }
+        showToast(queuedAny
+          ? `Added what it could \u2014 the rest are saved offline and will upload automatically`
+          : `Added ${batches.length} batches to floor`);
       }
       renderAll();
       closeModal();
@@ -4360,11 +4468,70 @@
     renderAll();
   }
 
+  // ---------- native push notifications (Capacitor) ----------
+  // Written defensively as a safe no-op: on a plain web/PWA session, or
+  // before @capacitor/push-notifications is actually installed in the iOS
+  // project, every check below simply returns early with no error. Once the
+  // native plugin is installed and this ships to your phone, it activates
+  // automatically — no further JS changes needed on this end.
+  async function initPushNotifications() {
+    if (!window.Capacitor || !Capacitor.isNativePlatform()) return; // browser/PWA — native push doesn't apply
+    const PushNotifications = Capacitor.Plugins && Capacitor.Plugins.PushNotifications;
+    if (!PushNotifications) return; // plugin not installed in the native project yet
+
+    try {
+      let perm = await PushNotifications.checkPermissions();
+      if (perm.receive !== 'granted') {
+        perm = await PushNotifications.requestPermissions();
+      }
+      if (perm.receive !== 'granted') return; // person said no — respect it, don't ask again this session
+
+      await PushNotifications.register();
+
+      PushNotifications.addListener('registration', async (token) => {
+        try {
+          await apiRequest('/api/push/register', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: token.value, platform: 'ios' }),
+          });
+        } catch (e) { /* will just retry silently next time the app opens */ }
+      });
+
+      PushNotifications.addListener('registrationError', () => {
+        // Non-fatal — the person simply won't get push notifications this session.
+      });
+
+      // Deep-link when a person taps a delivered notification, using the
+      // `data.screen` field set server-side in sendPushToUser() calls.
+      PushNotifications.addListener('pushNotificationActionPerformed', (action) => {
+        const data = action.notification && action.notification.data;
+        if (!data) return;
+        if (data.screen === 'tasks') document.getElementById('myTasksBtn').click();
+        else if (data.screen === 'billing' || data.screen === 'home') window.scrollTo({ top: 0, behavior: 'smooth' });
+      });
+    } catch (e) {
+      // Any unexpected native-bridge error — never let push setup break the app.
+    }
+  }
+
   async function init() {
     await loadStoreData();
     applyShelfDeepLinkIfPresent();
+    updateOfflineQueueBadge();
+    flushOfflineQueue(); // in case items were queued last session and we're back online now
+    initPushNotifications();
     setInterval(poll, POLL_INTERVAL_MS);
     document.addEventListener('visibilitychange', () => { if (!document.hidden) poll(); });
+  }
+
+  // Offline app-shell + UPC-lookup caching. Registered unconditionally on
+  // load — see /sw.js for exactly what it does and doesn't cache.
+  if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+      navigator.serviceWorker.register('/sw.js').catch(() => {
+        // Not fatal — the app just runs without offline support this time.
+      });
+    });
   }
 
   checkExistingSession();
