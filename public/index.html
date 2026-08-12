@@ -5053,6 +5053,39 @@
     modalScrollObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
   });
 
+  // TEMPORARY DIAGNOSTIC — pinned near the TOP this time (not the bottom,
+  // so it can't itself cover the button being tested), showing live scroll
+  // metrics for whichever modal is open plus the actual viewport size, now
+  // that the contentInset fix is in. Remove once diagnosed.
+  (function attachScrollDiag() {
+    const diag = document.createElement('div');
+    diag.id = 'scrollDiagBanner';
+    diag.style.cssText = 'position:fixed; top:env(safe-area-inset-top,0px); left:8px; right:8px; z-index:999999; background:#000; color:#0f0; font-family:monospace; font-size:10px; padding:6px; border-radius:6px; line-height:1.45; pointer-events:none;';
+    document.body.appendChild(diag);
+    function update() {
+      const modal = document.querySelector('.modal-overlay.open .modal');
+      const lines = [`window.innerHeight=${window.innerHeight} visualViewport=${window.visualViewport ? Math.round(window.visualViewport.height) : 'n/a'}`];
+      if (modal) {
+        const remaining = modal.scrollHeight - modal.clientHeight - modal.scrollTop;
+        lines.push(`modal scrollTop=${modal.scrollTop} scrollH=${modal.scrollHeight} clientH=${modal.clientHeight} remaining=${remaining}`);
+        const btn = document.getElementById('submitBtn');
+        if (btn) {
+          const r = btn.getBoundingClientRect();
+          lines.push(`submitBtn top=${Math.round(r.top)} bottom=${Math.round(r.bottom)} visible=${r.top >= 0 && r.bottom <= window.innerHeight}`);
+        }
+        const scanWrap = document.getElementById('scanWrap');
+        if (scanWrap) lines.push(`scanWrap.on=${scanWrap.classList.contains('on')} scanWrapH=${scanWrap.offsetHeight}`);
+      } else {
+        lines.push('no modal open');
+      }
+      diag.textContent = lines.join(' | ');
+    }
+    document.addEventListener('touchmove', update, { passive: true, capture: true });
+    document.addEventListener('scroll', update, { passive: true, capture: true });
+    setInterval(update, 400);
+    update();
+  })();
+
   checkExistingSession();
 })();
 </script>
