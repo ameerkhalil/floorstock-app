@@ -179,7 +179,7 @@
   .tag-actions .sell-btn { background: var(--ok-tint); color: var(--ok-text); }
   .tag-actions .label-btn { flex: 0 0 auto; padding: 7px 10px; color: var(--muted-2); }
 
-  .modal-overlay { position: fixed; inset: 0; background: rgba(28,37,48,0.55); display: none; align-items: center; justify-content: center; z-index: 250; padding: 16px; }
+  .modal-overlay { position: fixed; inset: 0; background: rgba(28,37,48,0.55); display: none; align-items: center; justify-content: center; z-index: 600; padding: 16px; }
   .modal-overlay.open { display: flex; }
   /* Locks the background page while any modal is open — without this, iOS
      treats the modal's own scroll and the page behind it as two competing
@@ -286,7 +286,7 @@
   .onboarding-step.done .onboarding-check { border-color: var(--ok-band); background: var(--ok-band); }
   .onboarding-step.done .onboarding-check::after { content: ''; width: 5px; height: 9px; border-right: 2px solid #fff; border-bottom: 2px solid #fff; transform: rotate(45deg) translate(-1px, -1px); }
 
-  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 7px; font-size: 13.5px; font-weight: 500; box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 300; display: none; align-items: center; gap: 6px; max-width: 90vw; text-align: center; }
+  .toast { position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%); background: var(--ink); color: #fff; padding: 10px 18px; border-radius: 7px; font-size: 13.5px; font-weight: 500; box-shadow: 0 4px 14px rgba(0,0,0,0.25); z-index: 700; display: none; align-items: center; gap: 6px; max-width: 90vw; text-align: center; }
   .toast.show { display: flex; }
 </style>
 </head>
@@ -5052,39 +5052,6 @@
   document.querySelectorAll('.modal-overlay').forEach(el => {
     modalScrollObserver.observe(el, { attributes: true, attributeFilter: ['class'] });
   });
-
-  // TEMPORARY DIAGNOSTIC — pinned near the TOP this time (not the bottom,
-  // so it can't itself cover the button being tested), showing live scroll
-  // metrics for whichever modal is open plus the actual viewport size, now
-  // that the contentInset fix is in. Remove once diagnosed.
-  (function attachScrollDiag() {
-    const diag = document.createElement('div');
-    diag.id = 'scrollDiagBanner';
-    diag.style.cssText = 'position:fixed; top:env(safe-area-inset-top,0px); left:8px; right:8px; z-index:999999; background:#000; color:#0f0; font-family:monospace; font-size:10px; padding:6px; border-radius:6px; line-height:1.45; pointer-events:none;';
-    document.body.appendChild(diag);
-    function update() {
-      const modal = document.querySelector('.modal-overlay.open .modal');
-      const lines = [`window.innerHeight=${window.innerHeight} visualViewport=${window.visualViewport ? Math.round(window.visualViewport.height) : 'n/a'}`];
-      if (modal) {
-        const remaining = modal.scrollHeight - modal.clientHeight - modal.scrollTop;
-        lines.push(`modal scrollTop=${modal.scrollTop} scrollH=${modal.scrollHeight} clientH=${modal.clientHeight} remaining=${remaining}`);
-        const btn = document.getElementById('submitBtn');
-        if (btn) {
-          const r = btn.getBoundingClientRect();
-          lines.push(`submitBtn top=${Math.round(r.top)} bottom=${Math.round(r.bottom)} visible=${r.top >= 0 && r.bottom <= window.innerHeight}`);
-        }
-        const scanWrap = document.getElementById('scanWrap');
-        if (scanWrap) lines.push(`scanWrap.on=${scanWrap.classList.contains('on')} scanWrapH=${scanWrap.offsetHeight}`);
-      } else {
-        lines.push('no modal open');
-      }
-      diag.textContent = lines.join(' | ');
-    }
-    document.addEventListener('touchmove', update, { passive: true, capture: true });
-    document.addEventListener('scroll', update, { passive: true, capture: true });
-    setInterval(update, 400);
-    update();
-  })();
 
   checkExistingSession();
 })();
