@@ -1344,6 +1344,7 @@
     }
     if (!res.ok) {
       let msg = 'Something went wrong.';
+      if (res.status === 413) msg = 'That file is too large to upload.';
       let billing = null;
       try { const body = await res.json(); if (body.error) msg = body.error; if (body.billing) billing = body.billing; } catch (e) {}
       const err = new Error(msg);
