@@ -3883,11 +3883,16 @@
 
   // Errors ZXing throws on every frame where no barcode happens to be in
   // view yet — these are normal and expected, not failures. Only
-  // unrecognized errors get surfaced to the person.
+  // unrecognized errors get surfaced to the person. Matched on message
+  // text rather than e.name/instanceof, since minified UMD builds can
+  // rename the underlying exception classes.
   function isBenignScanError(e) {
     if (!e) return true;
     const name = e.name || '';
-    return name === 'NotFoundException' || name === 'ChecksumException' || name === 'FormatException';
+    if (name === 'NotFoundException' || name === 'ChecksumException' || name === 'FormatException') return true;
+    const msg = (e.message || '').toLowerCase();
+    return msg.includes('not able to detect') || msg.includes('no multiformat')
+      || msg.includes('not found') || msg.includes('checksum') || msg.includes('format exception');
   }
 
   async function toggleTorch() {
@@ -3932,6 +3937,7 @@
       const result = zxingReader.decodeFromCanvas(scanCanvas);
       if (result && scanning) {
         guideBox.classList.add('found');
+        document.getElementById('scanError').style.display = 'none';
         const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
         const upc = normalizeScannedUpc(result.getText(), isUpcE);
         document.getElementById('upcInput').value = upc;
