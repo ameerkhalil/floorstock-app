@@ -1530,12 +1530,9 @@
   let hiddenAt = null;
   function handleAppHidden() {
     hiddenAt = Date.now();
-    showToast('[diag] app hidden'); // TEMPORARY — remove once auto-logout is confirmed working
   }
   function handleAppVisible() {
-    const elapsed = hiddenAt ? (Date.now() - hiddenAt) : null;
-    showToast(`[diag] app visible, hidden for ${elapsed}ms`); // TEMPORARY
-    if (hiddenAt && elapsed > AUTO_LOGOUT_THRESHOLD_MS) {
+    if (hiddenAt && (Date.now() - hiddenAt) > AUTO_LOGOUT_THRESHOLD_MS) {
       hiddenAt = null;
       if (currentUser) performLogout('Signed out \u2014 sign back in to continue');
     } else {
@@ -1543,19 +1540,15 @@
     }
   }
   function initAutoLogoutOnBackground() {
-    if (!window.Capacitor || !Capacitor.isNativePlatform()) {
-      showToast('[diag] not native — auto-logout skipped'); // TEMPORARY
-      return;
-    }
+    if (!window.Capacitor || !Capacitor.isNativePlatform()) return; // web/PWA — doesn't apply
     const AppPlugin = Capacitor.Plugins && Capacitor.Plugins.App;
     if (AppPlugin) {
-      showToast('[diag] using App plugin for auto-logout'); // TEMPORARY
       AppPlugin.addListener('appStateChange', (state) => {
-        showToast('[diag] appStateChange isActive=' + state.isActive); // TEMPORARY
         if (state.isActive) handleAppVisible(); else handleAppHidden();
       });
     } else {
-      showToast('[diag] App plugin missing — using visibilitychange fallback'); // TEMPORARY
+      // @capacitor/app isn't registering yet in this build — fall back to
+      // the web Page Visibility API, which has proven reliable enough here.
       document.addEventListener('visibilitychange', () => {
         if (document.hidden) handleAppHidden(); else handleAppVisible();
       });
