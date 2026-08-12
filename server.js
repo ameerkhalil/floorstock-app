@@ -352,6 +352,7 @@ if (!sessionCols.includes('organization_id')) db.exec("ALTER TABLE sessions ADD 
 const orgCols = db.prepare("PRAGMA table_info(organizations)").all().map(c => c.name);
 if (!orgCols.includes('critical_days')) db.exec("ALTER TABLE organizations ADD COLUMN critical_days INTEGER NOT NULL DEFAULT 3");
 if (!orgCols.includes('soon_days')) db.exec("ALTER TABLE organizations ADD COLUMN soon_days INTEGER NOT NULL DEFAULT 60");
+if (!orgCols.includes('business_type')) db.exec("ALTER TABLE organizations ADD COLUMN business_type TEXT");
 
 const pendingItemCols = db.prepare("PRAGMA table_info(pending_items)").all().map(c => c.name);
 if (!pendingItemCols.includes('cost_price')) db.exec("ALTER TABLE pending_items ADD COLUMN cost_price REAL");
@@ -538,12 +539,13 @@ function requireActiveSubscription(req, res, next) {
 
 // Register a new store + its manager account
 app.post('/api/auth/register-store', registerLimiter, (req, res) => {
-  const { storeName, storeAddress, username, password, email } = req.body || {};
+  const { storeName, storeAddress, username, password, email, businessType } = req.body || {};
   if (!storeName || !String(storeName).trim()) return res.status(400).json({ error: 'Store name is required.' });
   if (!storeAddress || !String(storeAddress).trim()) return res.status(400).json({ error: 'Store address is required.' });
   if (!username || !String(username).trim()) return res.status(400).json({ error: 'Username is required.' });
   if (!isStrongEnoughPassword(password)) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
   if (!isValidEmail(email)) return res.status(400).json({ error: 'A valid email is required (used for expiration alerts).' });
+  if (!businessType || !String(businessType).trim()) return res.status(400).json({ error: 'Please select what type of business this is.' });
 
   const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim().toLowerCase());
   if (existing) return res.status(409).json({ error: 'That username is already taken.' });
@@ -556,9 +558,9 @@ app.post('/api/auth/register-store', registerLimiter, (req, res) => {
   const trialEndsAt = new Date(Date.now() + TRIAL_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   db.prepare(`
-    INSERT INTO organizations (id, name, created_at, trial_ends_at, subscription_status)
-    VALUES (?, ?, ?, ?, 'trialing')
-  `).run(orgId, storeName.trim(), ts, trialEndsAt);
+    INSERT INTO organizations (id, name, created_at, trial_ends_at, subscription_status, business_type)
+    VALUES (?, ?, ?, ?, 'trialing', ?)
+  `).run(orgId, storeName.trim(), ts, trialEndsAt, businessType.trim());
   db.prepare('INSERT INTO stores (id, organization_id, name, address, created_at) VALUES (?, ?, ?, ?, ?)')
     .run(storeId, orgId, storeName.trim(), storeAddress.trim(), ts);
   db.prepare(`
@@ -1033,8 +1035,21 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
 
   const recentSignups = [...orgs]
     .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-    .slice(0, 10)
-    .map(o => ({ id: o.id, name: o.name, createdAt: o.created_at, status: o.subscription_status, storeCount: storeCountByOrg.get(o.id) || 1 }));
+    .map(o => {
+      const primaryStore = allStores.find(s => s.organization_id === o.id);
+      const manager = db.prepare("SELECT username, email FROM users WHERE organization_id = ? AND role = 'manager' LIMIT 1").get(o.id);
+      return {
+        id: o.id,
+        name: o.name,
+        createdAt: o.created_at,
+        status: o.subscription_status,
+        storeCount: storeCountByOrg.get(o.id) || 1,
+        businessType: o.business_type || null,
+        address: primaryStore ? primaryStore.address : null,
+        managerUsername: manager ? manager.username : null,
+        managerEmail: manager ? manager.email : null,
+      };
+    });
 
   res.json({
     totalStores,

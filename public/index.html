@@ -193,6 +193,8 @@
   }
   #rescueBody.collapsed { display: none; }
   #rescueChevron.collapsed { transform: rotate(-90deg); }
+  .lock-wrap { position: fixed; inset: 0; z-index: 1000; background: var(--ink); display: none; flex-direction: column; align-items: center; justify-content: center; padding: 24px; }
+  .lock-wrap.open { display: flex; }
   .modal { background: #fff; border-radius: 10px; width: 100%; max-width: 440px; max-height: 92vh; overflow-y: auto; box-shadow: 0 12px 40px rgba(0,0,0,0.3); }
   .modal-header { display: flex; justify-content: space-between; align-items: center; padding: 16px 18px; border-bottom: 1px solid var(--card-border); }
   .modal-title { font-family: 'Oswald', sans-serif; font-size: 17px; font-weight: 600; letter-spacing: 0.3px; }
@@ -285,6 +287,19 @@
 <body>
 
 <!-- ============ AUTH SCREEN ============ -->
+<div class="lock-wrap" id="faceIdLockScreen" style="display:none;">
+  <div class="brand-icon" style="width:64px; height:64px; margin: 0 auto 20px;">
+    <img src="/icon-512.png" alt="FloorStock">
+  </div>
+  <div style="font-family:'Oswald', sans-serif; font-size:20px; font-weight:600; color:#fff; margin-bottom:8px;">FloorStock is locked</div>
+  <p style="font-size:14px; color:rgba(255,255,255,0.7); margin-bottom:28px; text-align:center; max-width:280px;">Verify with Face ID to continue.</p>
+  <button type="button" class="add-worker-btn" id="faceIdUnlockBtn" style="max-width:220px;">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="margin-right:6px; vertical-align:-3px;"><path d="M9 12h.01"/><path d="M15 12h.01"/><path d="M10 16c.5.3 1.2.5 2 .5s1.5-.2 2-.5"/><path d="M9 4.5c.83-.32 1.94-.5 3-.5 4.97 0 9 3.13 9 7v3c0 3.87-4.03 7-9 7s-9-3.13-9-7v-3c0-1.7.78-3.26 2.09-4.5"/></svg>
+    Unlock with Face ID
+  </button>
+  <div class="auth-error" id="faceIdLockError" style="display:none; margin-top:14px; text-align:center;"></div>
+</div>
+
 <div class="auth-wrap" id="authScreen">
   <div class="landing-intro">
     <div class="brand-icon" style="width:56px; height:56px; margin: 0 auto 16px;">
@@ -376,6 +391,19 @@
         <div class="auth-field">
           <label>Store address</label>
           <input type="text" id="regStoreAddress" placeholder="e.g. 412 Elm St, Springfield">
+        </div>
+        <div class="auth-field">
+          <label>Type of business</label>
+          <select class="field-input" id="regBusinessType">
+            <option value="">Select one\u2026</option>
+            <option value="Convenience store">Convenience store</option>
+            <option value="Gas station / fuel + convenience">Gas station / fuel + convenience</option>
+            <option value="Grocery store">Grocery store</option>
+            <option value="Liquor store">Liquor store</option>
+            <option value="Smoke / vape shop">Smoke / vape shop</option>
+            <option value="Deli / food service">Deli / food service</option>
+            <option value="Other">Other</option>
+          </select>
         </div>
         <div class="auth-field">
           <label>Manager username</label>
@@ -962,7 +990,7 @@
         <div id="adminTrialEnding"></div>
         <div id="adminTrialEndingEmpty" style="font-size:13px;color:var(--muted);display:none;">None right now.</div>
 
-        <div class="section-label">Recent signups</div>
+        <div class="section-label">All stores</div>
         <div id="adminRecentSignups"></div>
       </div>
     </div>
@@ -1441,11 +1469,12 @@
     const errEl = document.getElementById('registerError');
     const storeName = document.getElementById('regStoreName').value.trim();
     const storeAddress = document.getElementById('regStoreAddress').value.trim();
+    const businessType = document.getElementById('regBusinessType').value;
     const username = document.getElementById('regUsername').value.trim();
     const email = document.getElementById('regEmail').value.trim();
     const password = document.getElementById('regPassword').value;
 
-    if (!storeName || !storeAddress || !username || !email || !password) {
+    if (!storeName || !storeAddress || !businessType || !username || !email || !password) {
       errEl.textContent = 'Fill in every field to create your store.';
       errEl.style.display = 'block';
       return;
@@ -1460,7 +1489,7 @@
     try {
       const result = await apiRequest('/api/auth/register-store', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ storeName, storeAddress, username, email, password }),
+        body: JSON.stringify({ storeName, storeAddress, businessType, username, email, password }),
       });
       currentUser = result;
       errEl.style.display = 'none';
@@ -1473,7 +1502,7 @@
     }
   });
 
-  document.getElementById('logoutBtn').addEventListener('click', async () => {
+  async function performLogout(reason) {
     try { await apiRequest('/api/auth/logout', { method: 'POST' }); } catch (e) {}
     currentUser = null;
     items = [];
@@ -1481,7 +1510,31 @@
     document.getElementById('authScreen').style.display = 'flex';
     document.getElementById('loginUsername').value = '';
     document.getElementById('loginPassword').value = '';
+    if (reason) showToast(reason);
+  }
+
+  // Force re-authentication every time the app is actually left and
+  // returned to — not on brief interruptions like a permission dialog or a
+  // notification banner, which also toggle document visibility momentarily.
+  // Scoped to the native app only: a manager checking email in another
+  // browser tab on their office desktop shouldn't get logged out constantly,
+  // but a shared shop-floor device should always prompt for the next
+  // person's own credentials before they can add or edit anything.
+  const AUTO_LOGOUT_THRESHOLD_MS = 5000;
+  let hiddenAt = null;
+  document.addEventListener('visibilitychange', () => {
+    if (!window.Capacitor || !Capacitor.isNativePlatform()) return;
+    if (document.hidden) {
+      hiddenAt = Date.now();
+    } else if (hiddenAt && (Date.now() - hiddenAt) > AUTO_LOGOUT_THRESHOLD_MS) {
+      hiddenAt = null;
+      if (currentUser) performLogout('Signed out \u2014 sign back in to continue');
+    } else {
+      hiddenAt = null;
+    }
   });
+
+  document.getElementById('logoutBtn').addEventListener('click', () => performLogout());
 
   function enterApp() {
     document.getElementById('authScreen').style.display = 'none';
@@ -1586,9 +1639,16 @@
       }
 
       document.getElementById('adminRecentSignups').innerHTML = d.recentSignups.map(s => `
-        <div class="audit-row">
-          <span style="font-weight:600;">${esc(s.name)}</span>
-          <span style="color:var(--muted); float:right;">${esc(s.status)} \u00b7 ${new Date(s.createdAt).toLocaleDateString()}</span>
+        <div class="audit-row" style="display:block; padding:10px 0;">
+          <div style="display:flex; justify-content:space-between; align-items:baseline;">
+            <span style="font-weight:600;">${esc(s.name)}</span>
+            <span style="color:var(--muted); font-size:12px;">${esc(s.status)} \u00b7 ${new Date(s.createdAt).toLocaleDateString()}</span>
+          </div>
+          <div style="font-size:12.5px; color:var(--muted-2); margin-top:3px; line-height:1.5;">
+            ${s.businessType ? esc(s.businessType) + ' \u00b7 ' : ''}${s.storeCount} location${s.storeCount !== 1 ? 's' : ''}
+            ${s.address ? `<br>${esc(s.address)}` : ''}
+            ${s.managerUsername ? `<br>${esc(s.managerUsername)}${s.managerEmail ? ' \u00b7 ' + esc(s.managerEmail) : ''}` : ''}
+          </div>
         </div>
       `).join('');
     } catch (e) {
@@ -4118,6 +4178,7 @@
       if (result && scanning) {
         guideBox.classList.add('found');
         document.getElementById('scanError').style.display = 'none';
+        hapticSuccess();
         const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
         const upc = normalizeScannedUpc(result.getText(), isUpcE);
         document.getElementById('upcInput').value = upc;
@@ -4466,6 +4527,17 @@
   async function loadStoreData() {
     await Promise.all([loadItems(), loadCategories()]);
     renderAll();
+  }
+
+  // ---------- haptic feedback ----------
+  // Same defensive pattern as push: safe no-op on web/PWA or before
+  // @capacitor/haptics is installed in the native project. Activates
+  // automatically once the plugin exists — no further JS changes needed.
+  function hapticSuccess() {
+    if (!window.Capacitor || !Capacitor.isNativePlatform()) return;
+    const Haptics = Capacitor.Plugins && Capacitor.Plugins.Haptics;
+    if (!Haptics) return;
+    try { Haptics.notification({ type: 'SUCCESS' }); } catch (e) {}
   }
 
   // ---------- native push notifications (Capacitor) ----------

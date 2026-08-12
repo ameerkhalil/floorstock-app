@@ -68,6 +68,8 @@
 	<true/>
 	<key>NSCameraUsageDescription</key>
 	<string>FloorStock uses your camera to scan product barcodes so you can add or look up inventory items quickly.</string>
+	<key>NSFaceIDUsageDescription</key>
+	<string>FloorStock can use Face ID to lock the app on this device, so inventory and financial data stays protected if someone else picks up the phone.</string>
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>remote-notification</string>
