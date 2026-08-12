@@ -4298,11 +4298,17 @@
     document.getElementById('modalTitle').textContent = 'COMPLETE SCAN';
     document.getElementById('submitBtn').textContent = t('submit_add');
     document.getElementById('editId').value = '';
-    document.getElementById('upcInput').value = isNoUpc ? 'No barcode' : pending.upc;
-    document.getElementById('upcInput').disabled = true;
-    document.getElementById('scanBtn').style.display = 'none';
-    document.getElementById('noUpcCheckbox').checked = false;
-    document.getElementById('noUpcCheckbox').closest('label').style.display = 'none';
+    // Unlike editing a confirmed item, a pending scan (especially one from
+    // an invoice import) never had a real barcode read — so unlike the
+    // locked-field behavior elsewhere, this always leaves the UPC/SKU
+    // field open to enter one by hand or scan it now if the product's on
+    // hand, rather than assuming "no barcode" is permanent.
+    document.getElementById('upcInput').disabled = false;
+    document.getElementById('upcInput').value = isNoUpc ? '' : pending.upc;
+    document.getElementById('scanBtn').style.display = 'flex';
+    document.getElementById('noUpcCheckbox').checked = isNoUpc;
+    document.getElementById('noUpcCheckbox').closest('label').style.display = 'flex';
+    applyNoUpcState();
     document.getElementById('nameInput').value = pending.name || '';
     resetBatchRows(pending.suggestedExpirationDate || '', pending.defaultQuantity !== null && pending.defaultQuantity !== undefined ? pending.defaultQuantity : '', true);
     document.getElementById('unitInput').value = 'each';

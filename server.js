@@ -1927,7 +1927,16 @@ async function extractInvoiceLineItems(base64Data, mediaType) {
               'Most invoices do NOT print expiration dates \u2014 leave expirationDate as null unless one is actually ' +
               'printed for that specific line (e.g. a "best by", "exp", or "sell by" date/code next to the item). ' +
               'Never calculate or estimate an expiration date yourself from a pack date, order date, or typical shelf ' +
-              'life \u2014 only report a date if it is literally printed on the invoice for that item.',
+              'life \u2014 only report a date if it is literally printed on the invoice for that item.\n\n' +
+              'Many lines describe a pack or case size in the product name or a separate column (e.g. "50PK", "24CT", ' +
+              '"CS/12", "box of 50", "case of 24"). When you see this, quantity and unitCost must both describe a ' +
+              'single individual sellable unit, NOT the box/case/pack as a whole:\n' +
+              '- quantity = the total number of individual units received (pack size \u00d7 number of packs/cases ordered).\n' +
+              '- unitCost = the line\u2019s total cost \u00f7 that same total individual-unit count.\n' +
+              'Example: a line reading "Snickers 50PK, Qty: 2, Total: $50.00" is 2 boxes of 50 bars = 100 bars total, ' +
+              'at $50.00 \u00f7 100 = $0.50 per bar \u2014 report quantity: 100, unitCost: 0.50. Do NOT report unitCost as the ' +
+              'price of an entire box or case; that would badly overstate the cost of one item. If a line has no ' +
+              'visible pack/case size, treat the ordered quantity as already being individual units.',
           },
         ],
       }],
