@@ -771,6 +771,67 @@ app.delete('/api/workers/:id', requireManager, (req, res) => {
 });
 
 // =====================================================================
+// MANAGERS (multiple managers per store — e.g. an assistant manager)
+// =====================================================================
+
+app.get('/api/managers', requireManager, (req, res) => {
+  const rows = db.prepare("SELECT id, username, email, created_at FROM users WHERE store_id = ? AND role = 'manager' ORDER BY created_at ASC").all(req.auth.storeId);
+  res.json(rows.map(r => ({ id: r.id, username: r.username, email: r.email || null, createdAt: r.created_at })));
+});
+
+app.post('/api/managers', requireManager, (req, res) => {
+  const { username, password, email } = req.body || {};
+  if (!username || !String(username).trim()) return res.status(400).json({ error: 'Username is required.' });
+  if (!isStrongEnoughPassword(password)) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+  if (email && !isValidEmail(email)) return res.status(400).json({ error: 'That email doesn\u2019t look right.' });
+
+  const existing = db.prepare('SELECT id FROM users WHERE username = ?').get(username.trim().toLowerCase());
+  if (existing) return res.status(409).json({ error: 'That username is already taken.' });
+
+  const id = newId();
+  const uname = username.trim().toLowerCase();
+  db.prepare(`
+    INSERT INTO users (id, organization_id, store_id, username, password_hash, role, email, created_at)
+    VALUES (?, ?, ?, ?, ?, 'manager', ?, ?)
+  `).run(id, req.auth.organizationId, req.auth.storeId, uname, bcrypt.hashSync(password, 10), email ? email.trim().toLowerCase() : null, nowIso());
+
+  logAudit(req.auth.storeId, currentUsername(req), 'manager_added', `Added manager login "${uname}" for this location`);
+  res.status(201).json({ id, username: uname, email: email ? email.trim().toLowerCase() : null });
+});
+
+app.put('/api/managers/:id/password', requireManager, (req, res) => {
+  const { password } = req.body || {};
+  if (!isStrongEnoughPassword(password)) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+  const manager = db.prepare("SELECT * FROM users WHERE id = ? AND store_id = ? AND role = 'manager'").get(req.params.id, req.auth.storeId);
+  if (!manager) return res.status(404).json({ error: 'Manager not found.' });
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(password, 10), req.params.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.params.id);
+
+  logAudit(req.auth.storeId, currentUsername(req), 'manager_password_reset', `Reset password for manager "${manager.username}"`);
+  res.status(204).end();
+});
+
+app.delete('/api/managers/:id', requireManager, (req, res) => {
+  const manager = db.prepare("SELECT * FROM users WHERE id = ? AND store_id = ? AND role = 'manager'").get(req.params.id, req.auth.storeId);
+  if (!manager) return res.status(404).json({ error: 'Manager not found.' });
+
+  if (req.params.id === req.auth.userId) {
+    return res.status(400).json({ error: 'You can\u2019t remove your own manager account while signed in as it.' });
+  }
+  const managerCount = db.prepare("SELECT COUNT(*) as c FROM users WHERE store_id = ? AND role = 'manager'").get(req.auth.storeId).c;
+  if (managerCount <= 1) {
+    return res.status(400).json({ error: 'Every store needs at least one manager \u2014 add another manager before removing this one.' });
+  }
+
+  db.prepare('DELETE FROM users WHERE id = ?').run(req.params.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(req.params.id);
+  logAudit(req.auth.storeId, currentUsername(req), 'manager_removed', `Removed manager login "${manager.username}"`);
+  res.status(204).end();
+});
+
+// =====================================================================
 // TASKS (manager assigns, any signed-in user at the store can see/complete)
 // =====================================================================
 
@@ -1976,6 +2037,67 @@ app.get('/api/reports/analytics', requireManager, (req, res) => {
     totalCount: wasteRows.length,
     byCategory, byEmployee, byVendor, byProduct, byMonth,
   });
+});
+
+// Vendor performance: unlike the "By vendor" waste breakdown above (which
+// only shows raw dollars lost), this computes an actual waste RATE per
+// vendor — wasted units divided by total units moved (sold + wasted) — so a
+// high-volume vendor doesn't look artificially worse than a low-volume one
+// just because they supply more product. This is the number that actually
+// informs "should I keep ordering from this vendor."
+app.get('/api/reports/vendor-performance', requireManager, (req, res) => {
+  const days = Number(req.query.days) || 90;
+  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+  const wasteRows = db.prepare(`
+    SELECT * FROM removals
+    WHERE store_id = ? AND removed_at >= ? AND (reason = 'expired' OR (reason = 'other' AND was_expired = 1))
+  `).all(req.auth.storeId, since);
+  const soldRemovalRows = db.prepare(`
+    SELECT * FROM removals WHERE store_id = ? AND removed_at >= ? AND reason = 'sold'
+  `).all(req.auth.storeId, since);
+  const salesRows = db.prepare('SELECT * FROM sales WHERE store_id = ? AND sold_at >= ?').all(req.auth.storeId, since);
+
+  const vendorMap = new Map();
+  function bucket(vendor) {
+    const key = vendor && String(vendor).trim() ? String(vendor).trim() : 'No vendor on file';
+    if (!vendorMap.has(key)) vendorMap.set(key, { vendor: key, soldUnits: 0, soldValue: 0, wastedUnits: 0, wastedValue: 0 });
+    return vendorMap.get(key);
+  }
+
+  for (const r of soldRemovalRows) {
+    const b = bucket(r.vendor);
+    b.soldUnits += r.quantity || 0;
+    b.soldValue += (r.selling_price || 0) * (r.quantity || 0);
+  }
+  for (const s of salesRows) {
+    const b = bucket(s.vendor);
+    b.soldUnits += s.quantity || 0;
+    b.soldValue += (s.selling_price || 0) * (s.quantity || 0);
+  }
+  for (const r of wasteRows) {
+    const b = bucket(r.vendor);
+    b.wastedUnits += r.quantity || 0;
+    b.wastedValue += (r.cost_price || 0) * (r.quantity || 0);
+  }
+
+  const vendors = Array.from(vendorMap.values())
+    .map(v => {
+      const totalUnits = v.soldUnits + v.wastedUnits;
+      return {
+        vendor: v.vendor,
+        soldUnits: Math.round(v.soldUnits * 100) / 100,
+        soldValue: Math.round(v.soldValue * 100) / 100,
+        wastedUnits: Math.round(v.wastedUnits * 100) / 100,
+        wastedValue: Math.round(v.wastedValue * 100) / 100,
+        totalUnits: Math.round(totalUnits * 100) / 100,
+        wasteRatePct: totalUnits > 0 ? Math.round((v.wastedUnits / totalUnits) * 1000) / 10 : 0,
+      };
+    })
+    .filter(v => v.totalUnits > 0)
+    .sort((a, b) => b.wasteRatePct - a.wasteRatePct);
+
+  res.json({ days, vendors });
 });
 
 // Cross-location view: totals across every store in the manager's

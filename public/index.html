@@ -476,6 +476,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="17.5" y1="14" x2="17.5" y2="17.5"/><line x1="14" y1="17.5" x2="21" y2="17.5"/></svg>
           Shelf QR
         </button>
+        <button class="btn-ghost" id="connectPosBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
+          Connect your POS
+        </button>
         <button class="btn-ghost" id="workersBtn" style="display:none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           Manage
@@ -996,6 +1000,30 @@
     </div>
   </div>
 
+  <!-- connect your POS (coming soon) -->
+  <div class="modal-overlay" id="connectPosOverlay">
+    <div class="modal" style="max-width:400px;">
+      <div class="modal-header">
+        <div class="modal-title">CONNECT YOUR POS</div>
+        <button class="modal-close" id="connectPosCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px; text-align:center;">
+        <div style="width:52px; height:52px; border-radius:50%; background:var(--soon-tint); display:flex; align-items:center; justify-content:center; margin:0 auto 16px;">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--soon-text)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M12 6v6l4 2"/></svg>
+        </div>
+        <div style="font-weight:700; font-size:15px; margin-bottom:8px;">Coming soon</div>
+        <p style="font-size:13.5px; color:var(--muted-2); line-height:1.6; margin:0 0 4px;">
+          We're working on direct point-of-sale integration, so sales sync automatically instead of needing a manual quick-sell or removal.
+        </p>
+        <p style="font-size:13.5px; color:var(--muted-2); line-height:1.6; margin:0;">
+          This is on our roadmap — reach out if you'd like to be notified when it's ready.
+        </p>
+      </div>
+    </div>
+  </div>
+
   <!-- removal reason modal -->
   <div class="modal-overlay" id="removeReasonOverlay">
     <div class="modal" style="max-width:360px;">
@@ -1046,6 +1074,19 @@
       </div>
 
       <div id="mgrPaneWorkers" style="padding: 18px;">
+        <div class="section-label" style="margin-top:0;">Managers</div>
+        <div id="managerList"></div>
+        <div id="managerEmpty" style="font-size:13px;color:var(--muted);display:none;">No other managers yet.</div>
+
+        <div class="section-label">Add a manager</div>
+        <div class="auth-error" id="managerError" style="display:none;"></div>
+        <form class="add-worker-form" id="addManagerForm">
+          <input id="newManagerUsername" placeholder="Username">
+          <input id="newManagerEmail" placeholder="Email (optional)" type="email">
+          <input id="newManagerPassword" placeholder="Password" type="password">
+          <button type="submit" class="add-worker-btn">Add</button>
+        </form>
+
         <div class="section-label">Current workers</div>
         <div id="workerList"></div>
         <div id="workerEmpty" style="font-size:13px;color:var(--muted);display:none;">No worker logins yet.</div>
@@ -1158,6 +1199,13 @@
         </p>
         <div id="analyticsBreakdowns"></div>
         <div id="analyticsEmpty" style="font-size:13px;color:var(--muted); display:none;">Nothing to break down yet.</div>
+
+        <div class="section-label">Vendor performance</div>
+        <p style="font-size:12.5px; color:var(--muted); line-height:1.5; margin-top:0; margin-bottom:12px;">
+          Waste rate = units lost to expiration ÷ total units sold or wasted for that vendor. Lower is better — use this to spot which vendors are worth reordering from.
+        </p>
+        <div id="vendorPerformanceList"></div>
+        <div id="vendorPerformanceEmpty" style="font-size:13px;color:var(--muted); display:none;">No vendor activity in this period yet.</div>
       </div>
 
       <div id="mgrPaneDigest" style="padding: 18px; display:none;">
@@ -1813,7 +1861,7 @@
     if (which === 'categories') renderCategoryManagerList();
     if (which === 'alerts') loadThresholdsPane();
     if (which === 'tasks') loadTasksPane();
-    if (which === 'reports') { loadShrinkReport(); loadAnalytics(); }
+    if (which === 'reports') { loadShrinkReport(); loadAnalytics(); loadVendorPerformance(); }
     if (which === 'digest') loadDigestFrequency();
   }
   document.getElementById('mgrTabWorkers').addEventListener('click', () => switchMgrTab('workers'));
@@ -1906,6 +1954,7 @@
     items.push({ id: 'exportBtn', label: 'Export inventory', icon: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>' });
     items.push({ id: 'printLabelsBtn', label: 'Print labels', icon: '<path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>' });
     items.push({ id: 'shelfQrBtn', label: 'Shelf QR labels', icon: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="17.5" y1="14" x2="17.5" y2="17.5"/><line x1="14" y1="17.5" x2="21" y2="17.5"/>' });
+    items.push({ id: 'connectPosBtn', label: 'Connect your POS', icon: '<rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>' });
     if (document.getElementById('workersBtn').style.display === 'flex') {
       items.push({ id: 'workersBtn', label: 'Manage', icon: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>' });
     }
@@ -2117,8 +2166,101 @@
     switchMgrTab('workers');
     document.getElementById('workersOverlay').classList.add('open');
     document.getElementById('workerError').style.display = 'none';
-    await loadWorkers();
+    document.getElementById('managerError').style.display = 'none';
+    await Promise.all([loadWorkers(), loadManagers()]);
   }
+
+  async function loadManagers() {
+    try {
+      const managers = await apiRequest('/api/managers');
+      const list = document.getElementById('managerList');
+      const empty = document.getElementById('managerEmpty');
+      if (managers.length === 0) {
+        list.innerHTML = '';
+        empty.style.display = 'block';
+        return;
+      }
+      empty.style.display = 'none';
+      list.innerHTML = managers.map(m => `
+        <div class="worker-row">
+          <div>
+            <div class="worker-name">${esc(m.username)}${m.username === currentUser.username ? ' (you)' : ''}</div>
+            <div class="worker-meta">${m.email ? esc(m.email) + ' \u00b7 ' : ''}Added ${new Date(m.createdAt).toLocaleDateString()}</div>
+          </div>
+          <div style="display:flex; gap:6px;">
+            <button type="button" class="worker-remove" style="background:var(--surface); color:var(--muted-2);" data-reset-id="${m.id}" data-username="${esc(m.username)}">Reset password</button>
+            ${m.username === currentUser.username ? '' : `<button type="button" class="worker-remove" data-mgr-id="${m.id}">Remove</button>`}
+          </div>
+        </div>
+      `).join('');
+      list.querySelectorAll('.worker-remove[data-mgr-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Remove this manager\u2019s access to this store?')) return;
+          try {
+            await apiRequest(`/api/managers/${btn.dataset.mgrId}`, { method: 'DELETE' });
+            showToast('Manager removed');
+            await loadManagers();
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+      });
+      list.querySelectorAll('[data-reset-id]').forEach(btn => {
+        btn.addEventListener('click', async () => {
+          const newPassword = prompt(`New password for "${btn.dataset.username}" (min 6 characters):`);
+          if (newPassword === null) return;
+          if (newPassword.length < 6) {
+            showToast('Password must be at least 6 characters');
+            return;
+          }
+          try {
+            await apiRequest(`/api/managers/${btn.dataset.resetId}/password`, {
+              method: 'PUT', headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ password: newPassword }),
+            });
+            showToast('Password reset');
+          } catch (err) {
+            showToast(err.message);
+          }
+        });
+      });
+    } catch (err) {
+      showToast(err.message);
+    }
+  }
+
+  document.getElementById('addManagerForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const errEl = document.getElementById('managerError');
+    const username = document.getElementById('newManagerUsername').value.trim();
+    const email = document.getElementById('newManagerEmail').value.trim();
+    const password = document.getElementById('newManagerPassword').value;
+    if (!username || !password) {
+      errEl.textContent = 'Enter a username and password for the manager.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (password.length < 6) {
+      errEl.textContent = 'Password must be at least 6 characters.';
+      errEl.style.display = 'block';
+      return;
+    }
+    try {
+      await apiRequest('/api/managers', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password, email: email || null }),
+      });
+      errEl.style.display = 'none';
+      document.getElementById('newManagerUsername').value = '';
+      document.getElementById('newManagerEmail').value = '';
+      document.getElementById('newManagerPassword').value = '';
+      showToast('Manager added');
+      await loadManagers();
+    } catch (err) {
+      errEl.textContent = err.message;
+      errEl.style.display = 'block';
+    }
+  });
 
   async function loadWorkers() {
     try {
@@ -2445,7 +2587,7 @@
     }
   }
 
-  document.getElementById('reportPeriodSelect').addEventListener('change', () => { loadShrinkReport(); loadAnalytics(); });
+  document.getElementById('reportPeriodSelect').addEventListener('change', () => { loadShrinkReport(); loadAnalytics(); loadVendorPerformance(); });
 
   async function loadAnalytics() {
     const days = document.getElementById('reportPeriodSelect').value;
@@ -2489,6 +2631,37 @@
       }).join('');
     } catch (e) {
       showToast(e.message || 'Couldn\u2019t load analytics');
+    }
+  }
+
+  async function loadVendorPerformance() {
+    const days = document.getElementById('reportPeriodSelect').value;
+    try {
+      const data = await apiRequest(`/api/reports/vendor-performance?days=${encodeURIComponent(days)}`);
+      const listEl = document.getElementById('vendorPerformanceList');
+      const emptyEl = document.getElementById('vendorPerformanceEmpty');
+      if (data.vendors.length === 0) {
+        listEl.innerHTML = '';
+        emptyEl.style.display = 'block';
+        return;
+      }
+      emptyEl.style.display = 'none';
+      listEl.innerHTML = data.vendors.map(v => {
+        const rateColor = v.wasteRatePct >= 25 ? 'var(--expired-band)' : v.wasteRatePct >= 10 ? 'var(--critical-band)' : 'var(--ok-band)';
+        return `
+          <div style="padding:10px 0; border-bottom:1px solid var(--card-border);">
+            <div style="display:flex; justify-content:space-between; align-items:baseline; margin-bottom:4px;">
+              <span style="font-weight:600; font-size:13.5px;">${esc(v.vendor)}</span>
+              <span style="font-weight:700; font-size:13.5px; color:${rateColor};">${v.wasteRatePct}% waste</span>
+            </div>
+            <div style="font-size:12px; color:var(--muted);">
+              ${v.soldUnits} sold \u00b7 ${v.wastedUnits} wasted ($${v.wastedValue.toFixed(2)})
+            </div>
+          </div>
+        `;
+      }).join('');
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t load vendor performance');
     }
   }
 
@@ -2720,6 +2893,16 @@
     document.getElementById('shelfQrOverlay').classList.add('open');
   }
   document.getElementById('shelfQrBtn').addEventListener('click', openShelfQrModal);
+
+  document.getElementById('connectPosBtn').addEventListener('click', () => {
+    document.getElementById('connectPosOverlay').classList.add('open');
+  });
+  document.getElementById('connectPosCloseBtn').addEventListener('click', () => {
+    document.getElementById('connectPosOverlay').classList.remove('open');
+  });
+  document.getElementById('connectPosOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'connectPosOverlay') document.getElementById('connectPosOverlay').classList.remove('open');
+  });
   document.getElementById('shelfQrCloseBtn').addEventListener('click', () => {
     document.getElementById('shelfQrOverlay').classList.remove('open');
   });
