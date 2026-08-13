@@ -1167,6 +1167,17 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     .map(o => {
       const primaryStore = allStores.find(s => s.organization_id === o.id);
       const manager = db.prepare("SELECT username, email FROM users WHERE organization_id = ? AND role = 'manager' LIMIT 1").get(o.id);
+      const orgStoreIds = allStores.filter(s => s.organization_id === o.id).map(s => s.id);
+      const productCount = orgStoreIds.length
+        ? db.prepare(`SELECT COUNT(*) as c FROM items WHERE store_id IN (${orgStoreIds.map(() => '?').join(',')})`).get(...orgStoreIds).c
+        : 0;
+      const lastSessionAt = orgStoreIds.length
+        ? db.prepare('SELECT MAX(created_at) as t FROM sessions WHERE organization_id = ?').get(o.id).t
+        : null;
+      const lastAuditAt = orgStoreIds.length
+        ? db.prepare(`SELECT MAX(created_at) as t FROM audit_log WHERE store_id IN (${orgStoreIds.map(() => '?').join(',')})`).get(...orgStoreIds).t
+        : null;
+      const lastActivityAt = [lastSessionAt, lastAuditAt].filter(Boolean).sort().pop() || null;
       return {
         id: o.id,
         name: o.name,
@@ -1177,6 +1188,8 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
         address: primaryStore ? primaryStore.address : null,
         managerUsername: manager ? manager.username : null,
         managerEmail: manager ? manager.email : null,
+        productCount,
+        lastActivityAt,
       };
     });
 
@@ -1193,6 +1206,89 @@ app.get('/api/admin/dashboard', requireAdmin, async (req, res) => {
     trialEndingSoon,
     recentSignups,
   });
+});
+
+// Full drill-down for a single organization — every store, every user, an
+// activity feed, and enough subscription detail to support them without
+// digging through the database by hand.
+app.get('/api/admin/organizations/:id', requireAdmin, (req, res) => {
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.params.id);
+  if (!org) return res.status(404).json({ error: 'Organization not found.' });
+
+  const stores = db.prepare('SELECT * FROM stores WHERE organization_id = ? ORDER BY created_at ASC').all(org.id);
+  const storeIds = stores.map(s => s.id);
+
+  const storesDetail = stores.map(s => {
+    const itemCount = db.prepare('SELECT COUNT(*) as c FROM items WHERE store_id = ?').get(s.id).c;
+    const users = db.prepare('SELECT id, username, role, email, created_at FROM users WHERE store_id = ? ORDER BY role ASC, created_at ASC').all(s.id);
+    return {
+      id: s.id, name: s.name, address: s.address, createdAt: s.created_at,
+      itemCount,
+      users: users.map(u => ({ id: u.id, username: u.username, role: u.role, email: u.email || null, createdAt: u.created_at })),
+    };
+  });
+
+  const recentActivity = storeIds.length
+    ? db.prepare(`
+        SELECT * FROM audit_log WHERE store_id IN (${storeIds.map(() => '?').join(',')})
+        ORDER BY created_at DESC LIMIT 30
+      `).all(...storeIds)
+    : [];
+
+  res.json({
+    id: org.id,
+    name: org.name,
+    businessType: org.business_type || null,
+    createdAt: org.created_at,
+    subscriptionStatus: org.subscription_status,
+    subscriptionPlan: org.subscription_plan || null,
+    trialEndsAt: org.trial_ends_at || null,
+    stripeCustomerId: org.stripe_customer_id || null,
+    stores: storesDetail,
+    recentActivity: recentActivity.map(a => ({ actor: a.actor_username, action: a.action, summary: a.summary, createdAt: a.created_at })),
+  });
+});
+
+app.post('/api/admin/organizations/:id/extend-trial', requireAdmin, (req, res) => {
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.params.id);
+  if (!org) return res.status(404).json({ error: 'Organization not found.' });
+
+  const days = Number(req.body && req.body.days);
+  if (!Number.isFinite(days) || days <= 0 || days > 365) return res.status(400).json({ error: 'Enter a number of days between 1 and 365.' });
+
+  const base = Math.max(Date.now(), org.trial_ends_at ? new Date(org.trial_ends_at).getTime() : 0);
+  const newTrialEndsAt = new Date(base + days * 24 * 60 * 60 * 1000).toISOString();
+  db.prepare("UPDATE organizations SET trial_ends_at = ?, subscription_status = 'trialing' WHERE id = ?").run(newTrialEndsAt, org.id);
+
+  res.json({ trialEndsAt: newTrialEndsAt });
+});
+
+app.put('/api/admin/organizations/:id/subscription-status', requireAdmin, (req, res) => {
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.params.id);
+  if (!org) return res.status(404).json({ error: 'Organization not found.' });
+
+  const { status } = req.body || {};
+  const allowed = ['trialing', 'active', 'past_due', 'canceled'];
+  if (!allowed.includes(status)) return res.status(400).json({ error: `Status must be one of: ${allowed.join(', ')}` });
+
+  db.prepare('UPDATE organizations SET subscription_status = ? WHERE id = ?').run(status, org.id);
+  res.json({ subscriptionStatus: status });
+});
+
+app.post('/api/admin/organizations/:id/reset-password', requireAdmin, (req, res) => {
+  const org = db.prepare('SELECT * FROM organizations WHERE id = ?').get(req.params.id);
+  if (!org) return res.status(404).json({ error: 'Organization not found.' });
+
+  const { userId, newPassword } = req.body || {};
+  if (!isStrongEnoughPassword(newPassword)) return res.status(400).json({ error: 'Password must be at least 6 characters.' });
+
+  const user = db.prepare('SELECT * FROM users WHERE id = ? AND organization_id = ?').get(userId, org.id);
+  if (!user) return res.status(404).json({ error: 'That user isn\u2019t part of this organization.' });
+
+  db.prepare('UPDATE users SET password_hash = ? WHERE id = ?').run(bcrypt.hashSync(newPassword, 10), user.id);
+  db.prepare('DELETE FROM sessions WHERE user_id = ?').run(user.id);
+
+  res.status(204).end();
 });
 
 function applySubscriptionToOrg(organizationId, stripeCustomerId, subscription, plan) {
@@ -1460,9 +1556,10 @@ function rowToItem(row) {
 }
 
 function validatePayload(body) {
-  const { upc, name, expirationDate, quantity, unit, location, sizeValue, sizeUnit, costPrice, sellingPrice, datePurchased } = body || {};
+  const { upc, name, expirationDate, quantity, unit, location, categoryId, sizeValue, sizeUnit, costPrice, sellingPrice, datePurchased } = body || {};
   if (!upc || typeof upc !== 'string' || !upc.trim()) return 'UPC is required.';
   if (!name || typeof name !== 'string' || !name.trim()) return 'Product name is required.';
+  if (!categoryId || typeof categoryId !== 'string' || !categoryId.trim()) return 'A category is required.';
   if (!expirationDate || typeof expirationDate !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(expirationDate)) {
     return 'A valid expiration date (YYYY-MM-DD) is required.';
   }
