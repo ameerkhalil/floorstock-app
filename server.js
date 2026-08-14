@@ -2672,24 +2672,6 @@ app.put('/api/notification-preferences', requireAuth, (req, res) => {
   res.status(204).end();
 });
 
-// TEMPORARY diagnostic endpoint — sends a real push to the signed-in
-// person right now and reports back exactly what happened at each step,
-// so a "why aren't I getting notifications" report can actually be
-// debugged instead of guessed at. Safe to remove once push is confirmed
-// working end to end; it bypasses notification-type preferences on
-// purpose since its whole point is testing the pipeline itself.
-app.post('/api/push/test', requireAuth, async (req, res) => {
-  const tokenRows = db.prepare('SELECT token, onesignal_player_id, platform, created_at FROM push_tokens WHERE user_id = ?').all(req.auth.userId);
-  const result = await sendPushToUser(req.auth.userId, 'Test notification', 'If you can see this, push notifications are working.', {});
-  res.json({
-    oneSignalConfigured: !!(ONESIGNAL_APP_ID && ONESIGNAL_REST_API_KEY),
-    devicesRegistered: tokenRows.length,
-    devicesLinkedToOneSignal: tokenRows.filter(r => r.onesignal_player_id).length,
-    devices: tokenRows.map(r => ({ platform: r.platform, hasOneSignalId: !!r.onesignal_player_id, registeredAt: r.created_at })),
-    sendResult: result,
-  });
-});
-
 async function sendDigestEmail(store, toEmail, alertItems) {
   const org = db.prepare('SELECT critical_days, soon_days FROM organizations WHERE id = ?').get(store.organization_id);
   return sendEmail({

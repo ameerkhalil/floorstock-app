@@ -1139,15 +1139,6 @@
         </p>
         <div id="notificationPrefsList" style="display:flex; flex-direction:column; gap:2px;"></div>
         <div class="auth-error" id="notificationPrefsError" style="display:none; margin-top:10px;"></div>
-
-        <div style="margin-top:22px; padding-top:16px; border-top:1px solid var(--card-border);">
-          <div style="font-size:11px; font-weight:700; color:var(--critical-text); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Temporary — testing tool</div>
-          <p style="font-size:12px; color:var(--muted); line-height:1.5; margin:0 0 10px;">
-            Sends a real push to this account right now and reports exactly what happened, to help debug why notifications might not be arriving.
-          </p>
-          <button type="button" id="sendTestNotificationBtn" class="add-worker-btn" style="width:100%;">Send test notification</button>
-          <div id="testNotificationResult" style="display:none; margin-top:10px; font-family:'IBM Plex Mono', monospace; font-size:11px; background:var(--surface); border-radius:7px; padding:10px; line-height:1.6; white-space:pre-wrap; word-break:break-word;"></div>
-        </div>
       </div>
     </div>
   </div>
@@ -4242,7 +4233,6 @@
 
   async function openNotificationSettings() {
     document.getElementById('notificationPrefsError').style.display = 'none';
-    document.getElementById('testNotificationResult').style.display = 'none';
     document.getElementById('notificationSettingsOverlay').classList.add('open');
     try {
       const prefs = await apiRequest('/api/notification-preferences');
@@ -4288,30 +4278,6 @@
   });
   document.getElementById('notificationSettingsOverlay').addEventListener('click', (e) => {
     if (e.target.id === 'notificationSettingsOverlay') document.getElementById('notificationSettingsOverlay').classList.remove('open');
-  });
-
-  document.getElementById('sendTestNotificationBtn').addEventListener('click', async () => {
-    const btn = document.getElementById('sendTestNotificationBtn');
-    const resultEl = document.getElementById('testNotificationResult');
-    btn.disabled = true;
-    btn.textContent = 'Sending\u2026';
-    resultEl.style.display = 'none';
-    try {
-      const result = await apiRequest('/api/push/test', { method: 'POST' });
-      resultEl.style.display = 'block';
-      resultEl.textContent = JSON.stringify(result, null, 2);
-      if (result.sendResult && result.sendResult.sent) {
-        showToast('Sent \u2014 check your phone');
-      } else {
-        showToast('Not sent \u2014 see details below for why');
-      }
-    } catch (e) {
-      resultEl.style.display = 'block';
-      resultEl.textContent = 'Request failed: ' + e.message;
-    } finally {
-      btn.disabled = false;
-      btn.textContent = 'Send test notification';
-    }
   });
 
   // ---------- inventory rescue ----------
@@ -5385,57 +5351,33 @@
   // project, every check below simply returns early with no error. Once the
   // native plugin is installed and this ships to your phone, it activates
   // automatically — no further JS changes needed on this end.
-  // TEMPORARY diagnostic log — accumulates every push-registration event
-  // on screen (toasts overwrite each other if several fire within a
-  // couple seconds, which is exactly what happens here). Remove this
-  // whole block, and swap the pushDiagLog(...) calls below back to
-  // nothing, once push registration is confirmed working.
-  function pushDiagLog(msg) {
-    let panel = document.getElementById('pushDiagPanel');
-    if (!panel) {
-      panel = document.createElement('div');
-      panel.id = 'pushDiagPanel';
-      panel.style.cssText = 'position:fixed; top:env(safe-area-inset-top,0px); left:8px; right:8px; z-index:999999; background:#000; color:#0f0; font-family:monospace; font-size:10.5px; padding:8px; border-radius:6px; line-height:1.5; max-height:40vh; overflow-y:auto; pointer-events:none;';
-      document.body.appendChild(panel);
-    }
-    const line = document.createElement('div');
-    line.textContent = new Date().toLocaleTimeString() + ' ' + msg;
-    panel.appendChild(line);
-  }
-
   async function initPushNotifications() {
     if (!window.Capacitor || !Capacitor.isNativePlatform()) return; // browser/PWA — native push doesn't apply
     const PushNotifications = Capacitor.Plugins && Capacitor.Plugins.PushNotifications;
-    if (!PushNotifications) { pushDiagLog('PushNotifications plugin not found'); return; } // TEMPORARY
+    if (!PushNotifications) return;
 
     try {
       let perm = await PushNotifications.checkPermissions();
-      pushDiagLog('checkPermissions: ' + perm.receive); // TEMPORARY
       if (perm.receive !== 'granted') {
         perm = await PushNotifications.requestPermissions();
-        pushDiagLog('requestPermissions: ' + perm.receive); // TEMPORARY
       }
-      if (perm.receive !== 'granted') { pushDiagLog('stopping — permission not granted'); return; } // TEMPORARY
+      if (perm.receive !== 'granted') return; // person said no — respect it, don't ask again this session
 
       // Listeners must be attached BEFORE calling register() — if register()
       // is called first, the native 'registration' event can fire and be
       // lost before anything is listening for it, silently leaving the
       // device with permission granted but never actually registered.
       PushNotifications.addListener('registration', async (token) => {
-        pushDiagLog('got token, len=' + (token && token.value ? token.value.length : 'none')); // TEMPORARY
         try {
           await apiRequest('/api/push/register', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: token.value, platform: 'ios' }),
           });
-          pushDiagLog('/api/push/register succeeded'); // TEMPORARY
-        } catch (e) {
-          pushDiagLog('/api/push/register FAILED: ' + e.message); // TEMPORARY
-        }
+        } catch (e) { /* will just retry silently next time the app opens */ }
       });
 
-      PushNotifications.addListener('registrationError', (err) => {
-        pushDiagLog('registrationError: ' + JSON.stringify(err)); // TEMPORARY
+      PushNotifications.addListener('registrationError', () => {
+        // Non-fatal — the person simply won't get push notifications this session.
       });
 
       // Deep-link when a person taps a delivered notification, using the
@@ -5447,11 +5389,9 @@
         else if (data.screen === 'billing' || data.screen === 'home') window.scrollTo({ top: 0, behavior: 'smooth' });
       });
 
-      pushDiagLog('calling register()\u2026'); // TEMPORARY
       await PushNotifications.register();
-      pushDiagLog('register() call completed'); // TEMPORARY
     } catch (e) {
-      pushDiagLog('EXCEPTION: ' + e.message); // TEMPORARY
+      // Any unexpected native-bridge error — never let push setup break the app.
     }
   }
 
