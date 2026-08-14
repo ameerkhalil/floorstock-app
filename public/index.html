@@ -42,18 +42,24 @@
   #introOverlay {
     position: fixed; inset: 0; z-index: 9999;
     background: var(--ink);
-    display: flex; align-items: center; justify-content: center;
-    animation: introFadeOut 400ms ease 900ms forwards;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    animation: introFadeOut 400ms ease 1050ms forwards;
   }
   #introLogo {
     width: 84px; height: 84px; border-radius: 20px;
     opacity: 0; transform: scale(0.7);
     animation: introPop 650ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
   }
+  #introWordmark {
+    animation: introFadeIn 400ms ease 400ms forwards;
+  }
   @keyframes introPop {
     0% { opacity: 0; transform: scale(0.7); }
     60% { opacity: 1; transform: scale(1.08); }
     100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes introFadeIn {
+    to { opacity: 1; }
   }
   @keyframes introFadeOut {
     to { opacity: 0; visibility: hidden; }
@@ -61,6 +67,7 @@
   @media (prefers-reduced-motion: reduce) {
     #introOverlay { animation: introFadeOut 200ms ease 300ms forwards; }
     #introLogo { animation: none; opacity: 1; transform: scale(1); }
+    #introWordmark { animation: none; opacity: 1; }
   }
   body { background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; min-height: 100vh; }
   button { font-family: inherit; cursor: pointer; }
@@ -324,6 +331,7 @@
      accidentally block a tap afterward. -->
 <div id="introOverlay">
   <img src="/icon-512.png" alt="FloorStock" id="introLogo">
+  <div id="introWordmark" class="auth-logo-title" style="color:#fff; margin-top:14px; opacity:0;">Floor<span class="brand-wordmark-stock">Stock</span></div>
 </div>
 
 <!-- ============ AUTH SCREEN ============ -->
@@ -468,7 +476,7 @@
     </div>
 
     <div class="auth-hint" style="margin-top:20px; border-top:1px solid var(--card-border); padding-top:14px;">
-      <a href="/terms.html" style="color:var(--muted);">Terms of Service</a> &middot; <a href="/privacy.html" style="color:var(--muted);">Privacy Policy</a>
+      <a href="/terms.html" style="color:var(--muted);">Terms of Service</a> &middot; <a href="/privacy.html" style="color:var(--muted);">Privacy Policy</a> &middot; <a href="/support.html" style="color:var(--muted);">Support</a>
     </div>
   </div>
 </div>
@@ -528,6 +536,10 @@
         <button class="btn-ghost" id="notificationSettingsBtn">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
           Notifications
+        </button>
+        <button class="btn-ghost" id="supportLinkBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
+          Support
         </button>
         <button class="btn-ghost" id="workersBtn" style="display:none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
@@ -2371,6 +2383,7 @@
     items.push({ id: 'shelfQrBtn', label: 'Shelf QR labels', icon: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="17.5" y1="14" x2="17.5" y2="17.5"/><line x1="14" y1="17.5" x2="21" y2="17.5"/>' });
     items.push({ id: 'connectPosBtn', label: 'Connect your POS', icon: '<rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>' });
     items.push({ id: 'notificationSettingsBtn', label: 'Notifications', icon: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>' });
+    items.push({ id: 'supportLinkBtn', label: 'Support', icon: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>' });
     if (document.getElementById('workersBtn').style.display === 'flex') {
       items.push({ id: 'workersBtn', label: 'Manage', icon: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>' });
     }
@@ -4306,6 +4319,9 @@
   }
 
   document.getElementById('notificationSettingsBtn').addEventListener('click', openNotificationSettings);
+  document.getElementById('supportLinkBtn').addEventListener('click', () => {
+    window.open('/support.html', '_blank');
+  });
   document.getElementById('notificationSettingsCloseBtn').addEventListener('click', () => {
     document.getElementById('notificationSettingsOverlay').classList.remove('open');
   });
@@ -5477,7 +5493,7 @@
   // animation has finished, rather than relying on the CSS animation's
   // visibility:hidden alone — guarantees it can never linger and block a
   // tap even if the animation doesn't run for some reason.
-  const introDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 500 : 1300;
+  const introDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 500 : 1450;
   setTimeout(() => {
     const intro = document.getElementById('introOverlay');
     if (intro) intro.remove();

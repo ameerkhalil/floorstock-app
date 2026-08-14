@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Support — FloorStock</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="icon" href="/icon-192.png" type="image/png">
+<style>
+  :root {
+    --bg: #EDEFF1; --ink: #1C2530; --muted: #8A97A3; --muted-2: #4A5560;
+    --border-light: #E2E6E9; --accent: #2D5F8A; --amber: #F5A623;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; line-height: 1.65; }
+  header { background: var(--ink); color: var(--bg); padding: 18px 20px; }
+  .header-inner { max-width: 760px; margin: 0 auto; display: flex; align-items: center; gap: 10px; }
+  .brand-icon { width: 30px; height: 30px; background: var(--accent); border-radius: 6px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .brand-title { font-family: 'Oswald', sans-serif; font-size: 17px; font-weight: 600; letter-spacing: 0.5px; }
+  main { max-width: 760px; margin: 0 auto; padding: 40px 20px 80px; }
+  .doc-card { background: #fff; border: 1px solid var(--border-light); border-radius: 12px; padding: 40px; }
+  h1 { font-family: 'Oswald', sans-serif; font-size: 28px; font-weight: 600; margin: 0 0 6px; }
+  .subtitle { color: var(--muted-2); font-size: 15px; margin-bottom: 30px; }
+  h2 { font-family: 'Oswald', sans-serif; font-size: 17px; font-weight: 600; margin: 32px 0 10px; letter-spacing: 0.2px; }
+  p, li { font-size: 14.5px; color: var(--muted-2); }
+  ul { padding-left: 20px; }
+  .placeholder { background: #FDF0E1; color: #7A5310; padding: 1px 5px; border-radius: 4px; font-weight: 600; }
+  .back-link { display: inline-block; margin-top: 30px; font-size: 13.5px; color: var(--accent); text-decoration: none; font-weight: 600; }
+  .contact-card { background: var(--bg); border: 1px solid var(--border-light); border-radius: 10px; padding: 20px 22px; margin-bottom: 8px; }
+  .contact-card a { color: var(--accent); font-weight: 600; text-decoration: none; }
+  .faq-item { border-bottom: 1px solid var(--border-light); padding: 16px 0; }
+  .faq-item:last-child { border-bottom: none; }
+  .faq-q { font-weight: 700; color: var(--ink); font-size: 14.5px; margin: 0 0 6px; }
+  .faq-a { margin: 0; }
+</style>
+</head>
+<body>
+<header>
+  <div class="header-inner">
+    <div class="brand-icon">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4a2 2 0 0 0 1-1.73Z"/><path d="m3.3 7 8.7 5 8.7-5"/><path d="M12 22V12"/></svg>
+    </div>
+    <div class="brand-title">FLOORSTOCK</div>
+  </div>
+</header>
+
+<main>
+  <div class="doc-card">
+    <h1>Support</h1>
+    <div class="subtitle">Get help, report a bug, or ask a question — most things get answered within a business day.</div>
+
+    <div class="contact-card">
+      <div style="font-weight:700; color:var(--ink); margin-bottom:4px;">Email support</div>
+      <a href="mailto:support@floorstock-app.com">support@floorstock-app.com</a>
+      <p style="margin:8px 0 0; font-size:13px;">
+        Include your store name and, if something's not working right, a screenshot — it helps us track down the issue faster.
+      </p>
+    </div>
+
+    <h2>Common questions</h2>
+
+    <div class="faq-item">
+      <p class="faq-q">A worker forgot their password — how do I reset it?</p>
+      <p class="faq-a">As a manager, open the <strong>Manage</strong> menu &rarr; <strong>Workers</strong> tab. Find their name and tap <strong>Reset password</strong> to set a new one for them.</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="faq-q">How do I add another manager or worker?</p>
+      <p class="faq-a">Same place &mdash; <strong>Manage</strong> &rarr; <strong>Workers</strong> tab has separate sections for adding managers and workers. Each person gets their own username and password.</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="faq-q">A barcode won't scan — what do I do?</p>
+      <p class="faq-a">Small or glossy packaging (like candy bars) can be genuinely hard for any phone camera to read. Type the UPC in by hand instead, or check "This item doesn't have a barcode" if there really isn't one printed.</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="faq-q">Why does every item need a category now?</p>
+      <p class="faq-a">Categories power a lot of the reporting (waste by category, filtering the dashboard) — making it required keeps that data actually useful. If you don't have the right one yet, you can create a new category right from the item form.</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="faq-q">How does invoice import work?</p>
+      <p class="faq-a">Upload a photo or PDF of a vendor invoice and it reads each line item into a pending queue for you to review. Nothing is added to your floor stock automatically — you'll fill in or confirm each item's expiration date before it's added, same as completing a regular scan.</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="faq-q">What happens when my free trial ends?</p>
+      <p class="faq-a">You'll get a heads-up a few days before it ends. Add billing under <strong>Manage</strong> &rarr; <strong>Billing</strong> anytime to keep things running without interruption.</p>
+    </div>
+
+    <div class="faq-item">
+      <p class="faq-q">I run more than one store — can they share data?</p>
+      <p class="faq-a">Each location has its own separate inventory, but if your account has multiple stores, managers can see a combined view across all of them from the "All Locations" dashboard, including transfer suggestions when one location is overstocked on something another is running low on.</p>
+    </div>
+
+    <p style="margin-top:30px; font-size:13.5px;">
+      Don't see your question here? Email <a href="mailto:support@floorstock-app.com" style="color:var(--accent); font-weight:600;">support@floorstock-app.com</a> and we'll help you sort it out.
+    </p>
+
+    <a href="/" class="back-link">&larr; Back to FloorStock</a>
+  </div>
+</main>
+</body>
+</html>
