@@ -1767,7 +1767,13 @@
   // Falls back to the web Page Visibility API in the meantime, which is
   // usually close enough but isn't guaranteed to fire on every native
   // background/foreground transition in a bare WKWebView.
-  const AUTO_LOGOUT_THRESHOLD_MS = 5000;
+  // Loosened from an initial 5 seconds — that was tight enough to force a
+  // re-login on nearly every quick app-switch (checking a text, glancing at
+  // a notification), which fights against the whole point of push
+  // notifications actually being useful. 3 minutes still logs out anyone
+  // who's set the device down for a real stretch, without punishing normal
+  // brief interruptions.
+  const AUTO_LOGOUT_THRESHOLD_MS = 3 * 60 * 1000;
   let hiddenAt = null;
   function handleAppHidden() {
     hiddenAt = Date.now();
