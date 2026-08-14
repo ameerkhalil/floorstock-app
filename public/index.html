@@ -38,6 +38,30 @@
   }
   * { box-sizing: border-box; min-width: 0; }
   html, body { margin: 0; padding: 0; max-width: 100vw; overflow-x: hidden; height: 100%; }
+
+  #introOverlay {
+    position: fixed; inset: 0; z-index: 9999;
+    background: var(--ink);
+    display: flex; align-items: center; justify-content: center;
+    animation: introFadeOut 400ms ease 900ms forwards;
+  }
+  #introLogo {
+    width: 84px; height: 84px; border-radius: 20px;
+    opacity: 0; transform: scale(0.7);
+    animation: introPop 650ms cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+  }
+  @keyframes introPop {
+    0% { opacity: 0; transform: scale(0.7); }
+    60% { opacity: 1; transform: scale(1.08); }
+    100% { opacity: 1; transform: scale(1); }
+  }
+  @keyframes introFadeOut {
+    to { opacity: 0; visibility: hidden; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    #introOverlay { animation: introFadeOut 200ms ease 300ms forwards; }
+    #introLogo { animation: none; opacity: 1; transform: scale(1); }
+  }
   body { background: var(--bg); color: var(--ink); font-family: 'Inter', sans-serif; min-height: 100vh; }
   button { font-family: inherit; cursor: pointer; }
   input, select { font-family: inherit; }
@@ -292,6 +316,15 @@
 </style>
 </head>
 <body>
+
+<!-- ============ INTRO ANIMATION ============ -->
+<!-- Plays once on every fresh load, then reveals whatever screen comes next
+     (sign-in, or straight into the app if already logged in). Removed from
+     the DOM entirely once finished, not just hidden, so it can never
+     accidentally block a tap afterward. -->
+<div id="introOverlay">
+  <img src="/icon-512.png" alt="FloorStock" id="introLogo">
+</div>
 
 <!-- ============ AUTH SCREEN ============ -->
 <div class="lock-wrap" id="faceIdLockScreen" style="display:none;">
@@ -5439,6 +5472,16 @@
 
   applyTranslations();
   checkExistingSession();
+
+  // Safety net: remove the intro overlay from the DOM outright once its
+  // animation has finished, rather than relying on the CSS animation's
+  // visibility:hidden alone — guarantees it can never linger and block a
+  // tap even if the animation doesn't run for some reason.
+  const introDuration = window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 500 : 1300;
+  setTimeout(() => {
+    const intro = document.getElementById('introOverlay');
+    if (intro) intro.remove();
+  }, introDuration);
 })();
 </script>
 </body>
