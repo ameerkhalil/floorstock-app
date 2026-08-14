@@ -312,6 +312,9 @@ if (!removalCols.includes('vendor')) db.exec("ALTER TABLE removals ADD COLUMN ve
 const taskCols = db.prepare("PRAGMA table_info(tasks)").all().map(c => c.name);
 if (!taskCols.includes('due_at')) db.exec("ALTER TABLE tasks ADD COLUMN due_at TEXT");
 
+const pushTokenCols = db.prepare("PRAGMA table_info(push_tokens)").all().map(c => c.name);
+if (!pushTokenCols.includes('onesignal_player_id')) db.exec("ALTER TABLE push_tokens ADD COLUMN onesignal_player_id TEXT");
+
 const salesCols = db.prepare("PRAGMA table_info(sales)").all().map(c => c.name);
 if (!salesCols.includes('vendor')) db.exec("ALTER TABLE sales ADD COLUMN vendor TEXT");
 if (!salesCols.includes('category_id')) db.exec("ALTER TABLE sales ADD COLUMN category_id TEXT");
@@ -2504,13 +2507,14 @@ async function sendEmail({ to, subject, html, attachments }) {
 // app for deep-linking (e.g. { screen: 'task', taskId }).
 async function sendPushToUser(userId, title, body, { badge, data } = {}) {
   if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return { sent: false, reason: 'not configured' };
-  const tokens = db.prepare('SELECT token FROM push_tokens WHERE user_id = ?').all(userId).map(r => r.token);
-  if (tokens.length === 0) return { sent: false, reason: 'no registered devices' };
+  const playerIds = db.prepare('SELECT onesignal_player_id FROM push_tokens WHERE user_id = ? AND onesignal_player_id IS NOT NULL')
+    .all(userId).map(r => r.onesignal_player_id);
+  if (playerIds.length === 0) return { sent: false, reason: 'no registered devices' };
 
   try {
     const payload = {
       app_id: ONESIGNAL_APP_ID,
-      include_player_ids: tokens, // "player_id" is OneSignal's name for a registered device token
+      include_player_ids: playerIds,
       headings: { en: title },
       contents: { en: body },
     };
@@ -2545,14 +2549,43 @@ function pushAlreadySentToday(dedupKey) {
   return false;
 }
 
-app.post('/api/push/register', requireAuth, (req, res) => {
+// Registers this device's raw APNs token with OneSignal server-side (via
+// their REST "Add a Device" endpoint) and returns the OneSignal-assigned
+// player ID that pushes actually get sent to. Doing this server-side means
+// the app never needs OneSignal's own client SDK installed — only
+// Capacitor's push-notifications plugin, which is what actually talks to
+// Apple and gets the raw token in the first place.
+async function registerDeviceWithOneSignal(rawToken) {
+  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return null;
+  try {
+    const response = await fetch('https://onesignal.com/api/v1/players', {
+      method: 'POST',
+      headers: { 'Authorization': `Basic ${ONESIGNAL_REST_API_KEY}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        app_id: ONESIGNAL_APP_ID,
+        device_type: 0, // 0 = iOS (APNs)
+        identifier: rawToken,
+      }),
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    return body && body.id ? body.id : null;
+  } catch (e) {
+    return null;
+  }
+}
+
+app.post('/api/push/register', requireAuth, async (req, res) => {
   const { token, platform } = req.body || {};
   if (!token || !String(token).trim()) return res.status(400).json({ error: 'A device token is required.' });
+
+  const onesignalPlayerId = await registerDeviceWithOneSignal(token.trim());
+
   db.prepare(`
-    INSERT INTO push_tokens (token, user_id, store_id, platform, created_at) VALUES (?, ?, ?, ?, ?)
-    ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, store_id = excluded.store_id, platform = excluded.platform
-  `).run(token.trim(), req.auth.userId, req.auth.storeId, platform || null, nowIso());
-  res.status(201).json({ registered: true });
+    INSERT INTO push_tokens (token, user_id, store_id, platform, created_at, onesignal_player_id) VALUES (?, ?, ?, ?, ?, ?)
+    ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, store_id = excluded.store_id, platform = excluded.platform, onesignal_player_id = excluded.onesignal_player_id
+  `).run(token.trim(), req.auth.userId, req.auth.storeId, platform || null, nowIso(), onesignalPlayerId);
+  res.status(201).json({ registered: true, oneSignalConnected: !!onesignalPlayerId });
 });
 
 app.post('/api/push/unregister', requireAuth, (req, res) => {
