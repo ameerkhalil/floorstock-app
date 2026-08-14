@@ -492,6 +492,10 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/></svg>
           Connect your POS
         </button>
+        <button class="btn-ghost" id="notificationSettingsBtn">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/></svg>
+          Notifications
+        </button>
         <button class="btn-ghost" id="workersBtn" style="display:none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           Manage
@@ -1116,6 +1120,34 @@
           </div>
           <button type="submit" class="submit-btn">Add note</button>
         </form>
+      </div>
+    </div>
+  </div>
+
+  <!-- notification preferences -->
+  <div class="modal-overlay" id="notificationSettingsOverlay">
+    <div class="modal" style="max-width:420px;">
+      <div class="modal-header">
+        <div class="modal-title">NOTIFICATIONS</div>
+        <button class="modal-close" id="notificationSettingsCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <p style="font-size:12.5px; color:var(--muted-2); line-height:1.5; margin-top:0; margin-bottom:16px;">
+          Choose which push notifications you want to receive on this account. Turning something off here applies everywhere you're signed in, not just this device.
+        </p>
+        <div id="notificationPrefsList" style="display:flex; flex-direction:column; gap:2px;"></div>
+        <div class="auth-error" id="notificationPrefsError" style="display:none; margin-top:10px;"></div>
+
+        <div style="margin-top:22px; padding-top:16px; border-top:1px solid var(--card-border);">
+          <div style="font-size:11px; font-weight:700; color:var(--critical-text); text-transform:uppercase; letter-spacing:0.4px; margin-bottom:6px;">Temporary — testing tool</div>
+          <p style="font-size:12px; color:var(--muted); line-height:1.5; margin:0 0 10px;">
+            Sends a real push to this account right now and reports exactly what happened, to help debug why notifications might not be arriving.
+          </p>
+          <button type="button" id="sendTestNotificationBtn" class="add-worker-btn" style="width:100%;">Send test notification</button>
+          <div id="testNotificationResult" style="display:none; margin-top:10px; font-family:'IBM Plex Mono', monospace; font-size:11px; background:var(--surface); border-radius:7px; padding:10px; line-height:1.6; white-space:pre-wrap; word-break:break-word;"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -2314,6 +2346,7 @@
     items.push({ id: 'printLabelsBtn', label: 'Print labels', icon: '<path d="M6 9V2h12v7"/><path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/><rect x="6" y="14" width="12" height="8"/>' });
     items.push({ id: 'shelfQrBtn', label: 'Shelf QR labels', icon: '<rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><line x1="14" y1="14" x2="14" y2="21"/><line x1="21" y1="14" x2="21" y2="21"/><line x1="17.5" y1="14" x2="17.5" y2="17.5"/><line x1="14" y1="17.5" x2="21" y2="17.5"/>' });
     items.push({ id: 'connectPosBtn', label: 'Connect your POS', icon: '<rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>' });
+    items.push({ id: 'notificationSettingsBtn', label: 'Notifications', icon: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>' });
     if (document.getElementById('workersBtn').style.display === 'flex') {
       items.push({ id: 'workersBtn', label: 'Manage', icon: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>' });
     }
@@ -4195,6 +4228,89 @@
     } catch (err) {
       errEl.textContent = err.message;
       errEl.style.display = 'block';
+    }
+  });
+
+  // ---------- notification preferences ----------
+  const NOTIFICATION_PREF_META = [
+    { key: 'taskAssigned', label: 'Task assigned to me', description: 'The moment a manager assigns you something.' },
+    { key: 'taskOverdue', label: 'Task overdue', description: 'A task assigned to you has passed its due date.' },
+    { key: 'expiredItems', label: 'Items expired overnight', description: 'Manager only \u2014 a daily check for anything that expired since yesterday.' },
+    { key: 'rescueItems', label: 'Inventory rescue candidates', description: 'Manager only \u2014 items still worth marking down before they\u2019re a total loss.' },
+    { key: 'trialEnding', label: 'Trial ending soon', description: 'Manager only \u2014 a heads-up in the last few days of your trial.' },
+  ];
+
+  async function openNotificationSettings() {
+    document.getElementById('notificationPrefsError').style.display = 'none';
+    document.getElementById('testNotificationResult').style.display = 'none';
+    document.getElementById('notificationSettingsOverlay').classList.add('open');
+    try {
+      const prefs = await apiRequest('/api/notification-preferences');
+      renderNotificationPrefs(prefs);
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t load notification settings');
+    }
+  }
+
+  function renderNotificationPrefs(prefs) {
+    const listEl = document.getElementById('notificationPrefsList');
+    listEl.innerHTML = NOTIFICATION_PREF_META.map(meta => `
+      <label style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--card-border); cursor:pointer;">
+        <span>
+          <span style="display:block; font-weight:600; font-size:13.5px;">${esc(meta.label)}</span>
+          <span style="display:block; font-size:11.5px; color:var(--muted); margin-top:2px; line-height:1.4;">${esc(meta.description)}</span>
+        </span>
+        <input type="checkbox" data-pref-key="${meta.key}" ${prefs[meta.key] ? 'checked' : ''} style="width:20px; height:20px; margin:2px 0 0; flex-shrink:0;">
+      </label>
+    `).join('');
+
+    listEl.querySelectorAll('[data-pref-key]').forEach(input => {
+      input.addEventListener('change', async () => {
+        const errEl = document.getElementById('notificationPrefsError');
+        try {
+          await apiRequest('/api/notification-preferences', {
+            method: 'PUT', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ [input.dataset.prefKey]: input.checked }),
+          });
+          errEl.style.display = 'none';
+        } catch (e) {
+          input.checked = !input.checked; // revert the toggle since the save failed
+          errEl.textContent = e.message;
+          errEl.style.display = 'block';
+        }
+      });
+    });
+  }
+
+  document.getElementById('notificationSettingsBtn').addEventListener('click', openNotificationSettings);
+  document.getElementById('notificationSettingsCloseBtn').addEventListener('click', () => {
+    document.getElementById('notificationSettingsOverlay').classList.remove('open');
+  });
+  document.getElementById('notificationSettingsOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'notificationSettingsOverlay') document.getElementById('notificationSettingsOverlay').classList.remove('open');
+  });
+
+  document.getElementById('sendTestNotificationBtn').addEventListener('click', async () => {
+    const btn = document.getElementById('sendTestNotificationBtn');
+    const resultEl = document.getElementById('testNotificationResult');
+    btn.disabled = true;
+    btn.textContent = 'Sending\u2026';
+    resultEl.style.display = 'none';
+    try {
+      const result = await apiRequest('/api/push/test', { method: 'POST' });
+      resultEl.style.display = 'block';
+      resultEl.textContent = JSON.stringify(result, null, 2);
+      if (result.sendResult && result.sendResult.sent) {
+        showToast('Sent \u2014 check your phone');
+      } else {
+        showToast('Not sent \u2014 see details below for why');
+      }
+    } catch (e) {
+      resultEl.style.display = 'block';
+      resultEl.textContent = 'Request failed: ' + e.message;
+    } finally {
+      btn.disabled = false;
+      btn.textContent = 'Send test notification';
     }
   });
 

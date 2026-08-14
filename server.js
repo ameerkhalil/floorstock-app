@@ -315,6 +315,14 @@ if (!taskCols.includes('due_at')) db.exec("ALTER TABLE tasks ADD COLUMN due_at T
 const pushTokenCols = db.prepare("PRAGMA table_info(push_tokens)").all().map(c => c.name);
 if (!pushTokenCols.includes('onesignal_player_id')) db.exec("ALTER TABLE push_tokens ADD COLUMN onesignal_player_id TEXT");
 
+// Per-user notification type preferences — default to on (1) so existing
+// users keep getting everything until they explicitly turn something off.
+const userNotifyCols = db.prepare("PRAGMA table_info(users)").all().map(c => c.name);
+const notifyPrefColumns = ['notify_task_assigned', 'notify_task_overdue', 'notify_expired_items', 'notify_rescue_items', 'notify_trial_ending'];
+for (const col of notifyPrefColumns) {
+  if (!userNotifyCols.includes(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 1`);
+}
+
 const salesCols = db.prepare("PRAGMA table_info(sales)").all().map(c => c.name);
 if (!salesCols.includes('vendor')) db.exec("ALTER TABLE sales ADD COLUMN vendor TEXT");
 if (!salesCols.includes('category_id')) db.exec("ALTER TABLE sales ADD COLUMN category_id TEXT");
@@ -907,7 +915,7 @@ app.post('/api/tasks', requireManager, (req, res) => {
 
   // Fire-and-forget — the task is already saved either way, so a slow or
   // failed push shouldn't delay or break the response to the manager.
-  sendPushToUser(assignedTo, 'New task assigned', title.trim(), { data: { screen: 'tasks', taskId: id } }).catch(() => {});
+  sendPushToUser(assignedTo, 'New task assigned', title.trim(), { data: { screen: 'tasks', taskId: id }, type: 'taskAssigned' }).catch(() => {});
 
   const row = db.prepare('SELECT * FROM tasks WHERE id = ?').get(id);
   res.status(201).json(rowToTask(row));
@@ -2504,9 +2512,29 @@ async function sendEmail({ to, subject, html, attachments }) {
 // Sends to every device the given user has registered. badge (optional) sets
 // the app icon's number badge on iOS — pass the person's open-task count (or
 // omit it to leave the badge untouched). data (optional) is delivered to the
-// app for deep-linking (e.g. { screen: 'task', taskId }).
-async function sendPushToUser(userId, title, body, { badge, data } = {}) {
+// app for deep-linking (e.g. { screen: 'task', taskId }). `type` maps to
+// one of the notify_* preference columns on users — pass null/omit for a
+// notification that should never be gated by preference (e.g. the manual
+// "send me a test" button).
+const NOTIFY_TYPE_COLUMN = {
+  taskAssigned: 'notify_task_assigned',
+  taskOverdue: 'notify_task_overdue',
+  expiredItems: 'notify_expired_items',
+  rescueItems: 'notify_rescue_items',
+  trialEnding: 'notify_trial_ending',
+};
+
+async function sendPushToUser(userId, title, body, { badge, data, type } = {}) {
   if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return { sent: false, reason: 'not configured' };
+
+  if (type) {
+    const col = NOTIFY_TYPE_COLUMN[type];
+    if (col) {
+      const user = db.prepare(`SELECT ${col} as pref FROM users WHERE id = ?`).get(userId);
+      if (user && user.pref === 0) return { sent: false, reason: `person has "${type}" notifications turned off` };
+    }
+  }
+
   const playerIds = db.prepare('SELECT onesignal_player_id FROM push_tokens WHERE user_id = ? AND onesignal_player_id IS NOT NULL')
     .all(userId).map(r => r.onesignal_player_id);
   if (playerIds.length === 0) return { sent: false, reason: 'no registered devices' };
@@ -2530,7 +2558,11 @@ async function sendPushToUser(userId, title, body, { badge, data } = {}) {
       const errBody = await response.text().catch(() => '');
       return { sent: false, reason: `push API error: ${response.status} ${errBody}` };
     }
-    return { sent: true };
+    const resultBody = await response.json().catch(() => null);
+    if (resultBody && resultBody.recipients === 0) {
+      return { sent: false, reason: `OneSignal accepted the request but reached 0 recipients${resultBody.errors ? ': ' + JSON.stringify(resultBody.errors) : ''}` };
+    }
+    return { sent: true, recipients: resultBody ? resultBody.recipients : undefined };
   } catch (e) {
     return { sent: false, reason: e.message };
   }
@@ -2592,6 +2624,55 @@ app.post('/api/push/unregister', requireAuth, (req, res) => {
   const { token } = req.body || {};
   if (token) db.prepare('DELETE FROM push_tokens WHERE token = ? AND user_id = ?').run(token, req.auth.userId);
   res.status(204).end();
+});
+
+app.get('/api/notification-preferences', requireAuth, (req, res) => {
+  const user = db.prepare(`
+    SELECT notify_task_assigned, notify_task_overdue, notify_expired_items, notify_rescue_items, notify_trial_ending
+    FROM users WHERE id = ?
+  `).get(req.auth.userId);
+  if (!user) return res.status(404).json({ error: 'User not found.' });
+  res.json({
+    taskAssigned: !!user.notify_task_assigned,
+    taskOverdue: !!user.notify_task_overdue,
+    expiredItems: !!user.notify_expired_items,
+    rescueItems: !!user.notify_rescue_items,
+    trialEnding: !!user.notify_trial_ending,
+  });
+});
+
+app.put('/api/notification-preferences', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const updates = [];
+  const values = [];
+  for (const [key, col] of Object.entries(NOTIFY_TYPE_COLUMN)) {
+    if (key in body) {
+      updates.push(`${col} = ?`);
+      values.push(body[key] ? 1 : 0);
+    }
+  }
+  if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update.' });
+  values.push(req.auth.userId);
+  db.prepare(`UPDATE users SET ${updates.join(', ')} WHERE id = ?`).run(...values);
+  res.status(204).end();
+});
+
+// TEMPORARY diagnostic endpoint — sends a real push to the signed-in
+// person right now and reports back exactly what happened at each step,
+// so a "why aren't I getting notifications" report can actually be
+// debugged instead of guessed at. Safe to remove once push is confirmed
+// working end to end; it bypasses notification-type preferences on
+// purpose since its whole point is testing the pipeline itself.
+app.post('/api/push/test', requireAuth, async (req, res) => {
+  const tokenRows = db.prepare('SELECT token, onesignal_player_id, platform, created_at FROM push_tokens WHERE user_id = ?').all(req.auth.userId);
+  const result = await sendPushToUser(req.auth.userId, 'Test notification', 'If you can see this, push notifications are working.', {});
+  res.json({
+    oneSignalConfigured: !!(ONESIGNAL_APP_ID && ONESIGNAL_REST_API_KEY),
+    devicesRegistered: tokenRows.length,
+    devicesLinkedToOneSignal: tokenRows.filter(r => r.onesignal_player_id).length,
+    devices: tokenRows.map(r => ({ platform: r.platform, hasOneSignalId: !!r.onesignal_player_id, registeredAt: r.created_at })),
+    sendResult: result,
+  });
 });
 
 async function sendDigestEmail(store, toEmail, alertItems) {
@@ -2699,7 +2780,7 @@ function runOverdueTaskPushCheck() {
   `).all(nowIsoStr.slice(0, 19));
   for (const task of overdue) {
     if (pushAlreadySentToday(`overdue-task:${task.id}`)) continue;
-    sendPushToUser(task.assigned_to, 'Task overdue', task.title).catch(() => {});
+    sendPushToUser(task.assigned_to, 'Task overdue', task.title, { type: 'taskOverdue' }).catch(() => {});
   }
 }
 setInterval(runOverdueTaskPushCheck, 60 * 60 * 1000); // hourly check
@@ -2732,7 +2813,7 @@ function runDailyOpsPushCheck() {
     if (newlyExpired.length > 0 && !pushAlreadySentToday(`expired:${store.id}`)) {
       sendPushToUser(manager.id, `${newlyExpired.length} item${newlyExpired.length !== 1 ? 's' : ''} expired overnight`,
         newlyExpired.slice(0, 3).map(it => it.name).join(', ') + (newlyExpired.length > 3 ? ', \u2026' : ''),
-        { data: { screen: 'home' } }).catch(() => {});
+        { data: { screen: 'home' }, type: 'expiredItems' }).catch(() => {});
     }
 
     // Inventory rescue: items still worth marking down rather than writing
@@ -2745,7 +2826,7 @@ function runDailyOpsPushCheck() {
     if (rescueCandidates.length > 0 && !pushAlreadySentToday(`rescue:${store.id}`)) {
       sendPushToUser(manager.id, `${rescueCandidates.length} item${rescueCandidates.length !== 1 ? 's' : ''} worth marking down`,
         'Still sellable if discounted soon \u2014 check Inventory Rescue.',
-        { data: { screen: 'home' } }).catch(() => {});
+        { data: { screen: 'home' }, type: 'rescueItems' }).catch(() => {});
     }
 
     // Trial ending soon.
@@ -2754,7 +2835,7 @@ function runDailyOpsPushCheck() {
       if (daysLeft >= 0 && daysLeft <= 3 && !pushAlreadySentToday(`trial:${store.organization_id}`)) {
         sendPushToUser(manager.id, daysLeft === 0 ? 'Trial ends today' : `Trial ends in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
           'Add billing to keep FloorStock running without interruption.',
-          { data: { screen: 'billing' } }).catch(() => {});
+          { data: { screen: 'billing' }, type: 'trialEnding' }).catch(() => {});
       }
     }
   }
