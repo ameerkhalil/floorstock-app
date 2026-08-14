@@ -5397,8 +5397,10 @@
       }
       if (perm.receive !== 'granted') return; // person said no — respect it, don't ask again this session
 
-      await PushNotifications.register();
-
+      // Listeners must be attached BEFORE calling register() — if register()
+      // is called first, the native 'registration' event can fire and be
+      // lost before anything is listening for it, silently leaving the
+      // device with permission granted but never actually registered.
       PushNotifications.addListener('registration', async (token) => {
         try {
           await apiRequest('/api/push/register', {
@@ -5420,6 +5422,8 @@
         if (data.screen === 'tasks') document.getElementById('myTasksBtn').click();
         else if (data.screen === 'billing' || data.screen === 'home') window.scrollTo({ top: 0, behavior: 'smooth' });
       });
+
+      await PushNotifications.register();
     } catch (e) {
       // Any unexpected native-bridge error — never let push setup break the app.
     }
