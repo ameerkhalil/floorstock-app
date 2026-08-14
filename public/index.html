@@ -5385,33 +5385,57 @@
   // project, every check below simply returns early with no error. Once the
   // native plugin is installed and this ships to your phone, it activates
   // automatically — no further JS changes needed on this end.
+  // TEMPORARY diagnostic log — accumulates every push-registration event
+  // on screen (toasts overwrite each other if several fire within a
+  // couple seconds, which is exactly what happens here). Remove this
+  // whole block, and swap the pushDiagLog(...) calls below back to
+  // nothing, once push registration is confirmed working.
+  function pushDiagLog(msg) {
+    let panel = document.getElementById('pushDiagPanel');
+    if (!panel) {
+      panel = document.createElement('div');
+      panel.id = 'pushDiagPanel';
+      panel.style.cssText = 'position:fixed; top:env(safe-area-inset-top,0px); left:8px; right:8px; z-index:999999; background:#000; color:#0f0; font-family:monospace; font-size:10.5px; padding:8px; border-radius:6px; line-height:1.5; max-height:40vh; overflow-y:auto; pointer-events:none;';
+      document.body.appendChild(panel);
+    }
+    const line = document.createElement('div');
+    line.textContent = new Date().toLocaleTimeString() + ' ' + msg;
+    panel.appendChild(line);
+  }
+
   async function initPushNotifications() {
     if (!window.Capacitor || !Capacitor.isNativePlatform()) return; // browser/PWA — native push doesn't apply
     const PushNotifications = Capacitor.Plugins && Capacitor.Plugins.PushNotifications;
-    if (!PushNotifications) return; // plugin not installed in the native project yet
+    if (!PushNotifications) { pushDiagLog('PushNotifications plugin not found'); return; } // TEMPORARY
 
     try {
       let perm = await PushNotifications.checkPermissions();
+      pushDiagLog('checkPermissions: ' + perm.receive); // TEMPORARY
       if (perm.receive !== 'granted') {
         perm = await PushNotifications.requestPermissions();
+        pushDiagLog('requestPermissions: ' + perm.receive); // TEMPORARY
       }
-      if (perm.receive !== 'granted') return; // person said no — respect it, don't ask again this session
+      if (perm.receive !== 'granted') { pushDiagLog('stopping — permission not granted'); return; } // TEMPORARY
 
       // Listeners must be attached BEFORE calling register() — if register()
       // is called first, the native 'registration' event can fire and be
       // lost before anything is listening for it, silently leaving the
       // device with permission granted but never actually registered.
       PushNotifications.addListener('registration', async (token) => {
+        pushDiagLog('got token, len=' + (token && token.value ? token.value.length : 'none')); // TEMPORARY
         try {
           await apiRequest('/api/push/register', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: token.value, platform: 'ios' }),
           });
-        } catch (e) { /* will just retry silently next time the app opens */ }
+          pushDiagLog('/api/push/register succeeded'); // TEMPORARY
+        } catch (e) {
+          pushDiagLog('/api/push/register FAILED: ' + e.message); // TEMPORARY
+        }
       });
 
-      PushNotifications.addListener('registrationError', () => {
-        // Non-fatal — the person simply won't get push notifications this session.
+      PushNotifications.addListener('registrationError', (err) => {
+        pushDiagLog('registrationError: ' + JSON.stringify(err)); // TEMPORARY
       });
 
       // Deep-link when a person taps a delivered notification, using the
@@ -5423,9 +5447,11 @@
         else if (data.screen === 'billing' || data.screen === 'home') window.scrollTo({ top: 0, behavior: 'smooth' });
       });
 
+      pushDiagLog('calling register()\u2026'); // TEMPORARY
       await PushNotifications.register();
+      pushDiagLog('register() call completed'); // TEMPORARY
     } catch (e) {
-      // Any unexpected native-bridge error — never let push setup break the app.
+      pushDiagLog('EXCEPTION: ' + e.message); // TEMPORARY
     }
   }
 
