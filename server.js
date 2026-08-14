@@ -411,7 +411,22 @@ app.post('/api/webhooks/stripe', express.raw({ type: 'application/json' }), (req
 
 app.use(express.json({ limit: '25mb' }));
 app.use(cookieParser());
-app.use(express.static(path.join(__dirname, 'public')));
+app.use(express.static(path.join(__dirname, 'public'), {
+  // index.html specifically must always be revalidated with the server
+  // before use — without this, the native app's WKWebView can silently
+  // keep serving a stale disk-cached copy indefinitely after a deploy,
+  // surviving even a full force-quit/reopen (only a full app reinstall
+  // clears it). "no-cache" still allows fast conditional (304) reloads
+  // when nothing's actually changed, it just forbids using a cached copy
+  // without checking first. Other static assets (icons, manifest) keep
+  // normal caching since they change rarely and reloading them on every
+  // request would be wasteful.
+  setHeaders: (res, filePath) => {
+    if (path.basename(filePath) === 'index.html') {
+      res.setHeader('Cache-Control', 'no-cache');
+    }
+  },
+}));
 
 // ---------- rate limiting (basic brute-force / abuse protection) ----------
 const loginLimiter = rateLimit({
