@@ -2678,13 +2678,20 @@ async function sendPushToUser(userId, title, body, { badge, data, type } = {}) {
 // assigned to you" should always fire, but a hookup that re-checks every
 // hour (overdue tasks, overnight-expired items) needs to dedupe so the
 // person isn't renotified every single hour the condition stays true.
-function pushAlreadySentToday(dedupKey) {
+//
+// Split into a pure read-check and a separate mark-as-sent, called only
+// after confirming sendPushToUser() actually succeeded. Previously this
+// was a single function that locked in "sent today" the moment a send was
+// merely attempted — so a failure early in the day (e.g. the device
+// wasn't registered yet) would permanently block every retry for the rest
+// of that day, even after the underlying problem got fixed an hour later.
+function wasPushSentToday(dedupKey) {
   const today = todayUtcDateStr();
-  const key = `${dedupKey}:${today}`;
-  const already = db.prepare('SELECT 1 FROM push_notify_log WHERE dedup_key = ?').get(key);
-  if (already) return true;
-  db.prepare('INSERT OR IGNORE INTO push_notify_log (dedup_key, sent_at) VALUES (?, ?)').run(key, nowIso());
-  return false;
+  return !!db.prepare('SELECT 1 FROM push_notify_log WHERE dedup_key = ?').get(`${dedupKey}:${today}`);
+}
+function markPushSentToday(dedupKey) {
+  const today = todayUtcDateStr();
+  db.prepare('INSERT OR IGNORE INTO push_notify_log (dedup_key, sent_at) VALUES (?, ?)').run(`${dedupKey}:${today}`, nowIso());
 }
 
 // Registers this device's raw APNs token with OneSignal server-side (via
@@ -2881,10 +2888,13 @@ function runOverdueTaskPushCheck() {
   `).all(nowIsoStr.slice(0, 19));
   console.log(`[push] runOverdueTaskPushCheck found ${overdue.length} overdue task(s)`);
   for (const task of overdue) {
-    const alreadySent = pushAlreadySentToday(`overdue-task:${task.id}`);
+    const dedupKey = `overdue-task:${task.id}`;
+    const alreadySent = wasPushSentToday(dedupKey);
     console.log(`[push] task=${task.id} "${task.title}" assignedTo=${task.assigned_to} alreadySentToday=${alreadySent}`);
     if (alreadySent) continue;
-    sendPushToUser(task.assigned_to, 'Task overdue', task.title, { type: 'taskOverdue' }).catch(() => {});
+    sendPushToUser(task.assigned_to, 'Task overdue', task.title, { type: 'taskOverdue' })
+      .then(result => { if (result.sent) markPushSentToday(dedupKey); })
+      .catch(() => {});
   }
 }
 runOverdueTaskPushCheck();
@@ -2921,12 +2931,15 @@ function runDailyOpsPushCheck() {
     // they crossed into "expired" overnight rather than having been expired
     // for a while already (which would otherwise re-notify every single day).
     const newlyExpired = allItems.filter(it => it.expiration_date === yesterday);
-    const expiredAlreadySent = pushAlreadySentToday(`expired:${store.id}`); // has a side effect (marks as sent) — call exactly once
+    const expiredKey = `expired:${store.id}`;
+    const expiredAlreadySent = wasPushSentToday(expiredKey);
     console.log(`[push] store=${store.id} newlyExpired=${newlyExpired.length} alreadySentToday=${expiredAlreadySent}`);
     if (newlyExpired.length > 0 && !expiredAlreadySent) {
       sendPushToUser(manager.id, `${newlyExpired.length} item${newlyExpired.length !== 1 ? 's' : ''} expired overnight`,
         newlyExpired.slice(0, 3).map(it => it.name).join(', ') + (newlyExpired.length > 3 ? ', \u2026' : ''),
-        { data: { screen: 'home' }, type: 'expiredItems' }).catch(() => {});
+        { data: { screen: 'home' }, type: 'expiredItems' })
+        .then(result => { if (result.sent) markPushSentToday(expiredKey); })
+        .catch(() => {});
     }
 
     // Inventory rescue: items still worth marking down rather than writing
@@ -2936,27 +2949,32 @@ function runDailyOpsPushCheck() {
       const u = urgencyOf(it.expiration_date, criticalDays, soonDays);
       return u === 'critical' || u === 'soon';
     });
-    const rescueAlreadySent = pushAlreadySentToday(`rescue:${store.id}`); // has a side effect — call exactly once
+    const rescueKey = `rescue:${store.id}`;
+    const rescueAlreadySent = wasPushSentToday(rescueKey);
     console.log(`[push] store=${store.id} rescueCandidates=${rescueCandidates.length} alreadySentToday=${rescueAlreadySent}`);
     if (rescueCandidates.length > 0 && !rescueAlreadySent) {
       sendPushToUser(manager.id, `${rescueCandidates.length} item${rescueCandidates.length !== 1 ? 's' : ''} worth marking down`,
         'Still sellable if discounted soon \u2014 check Inventory Rescue.',
-        { data: { screen: 'home' }, type: 'rescueItems' }).catch(() => {});
+        { data: { screen: 'home' }, type: 'rescueItems' })
+        .then(result => { if (result.sent) markPushSentToday(rescueKey); })
+        .catch(() => {});
     }
 
     // Trial ending soon.
     if (org && org.trial_ends_at && org.subscription_status === 'trialing') {
       const daysLeft = Math.ceil((new Date(org.trial_ends_at).getTime() - Date.now()) / 86400000);
       const inWindow = daysLeft >= 0 && daysLeft <= 3;
-      // Only check (and thus only mark-as-sent) when actually in the
-      // 0\u20133 day window \u2014 calling this outside the window would
-      // needlessly burn today's dedup slot for no reason.
-      const trialAlreadySent = inWindow ? pushAlreadySentToday(`trial:${store.organization_id}`) : null;
+      const trialKey = `trial:${store.organization_id}`;
+      // Only check (and thus only log/lock) when actually in the 0\u20133
+      // day window \u2014 checking outside the window is meaningless.
+      const trialAlreadySent = inWindow ? wasPushSentToday(trialKey) : null;
       console.log(`[push] store=${store.id} trial daysLeft=${daysLeft} status=${org.subscription_status} inWindow=${inWindow} alreadySentToday=${trialAlreadySent}`);
       if (inWindow && !trialAlreadySent) {
         sendPushToUser(manager.id, daysLeft === 0 ? 'Trial ends today' : `Trial ends in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
           'Add billing to keep FloorStock running without interruption.',
-          { data: { screen: 'billing' }, type: 'trialEnding' }).catch(() => {});
+          { data: { screen: 'billing' }, type: 'trialEnding' })
+          .then(result => { if (result.sent) markPushSentToday(trialKey); })
+          .catch(() => {});
       }
     } else if (org) {
       console.log(`[push] store=${store.id} trial check skipped: trial_ends_at=${org.trial_ends_at} status=${org.subscription_status}`);
