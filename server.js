@@ -2760,6 +2760,16 @@ app.post('/api/push/register', requireAuth, async (req, res) => {
     INSERT INTO push_tokens (token, user_id, store_id, platform, created_at, onesignal_player_id) VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(token) DO UPDATE SET user_id = excluded.user_id, store_id = excluded.store_id, platform = excluded.platform, onesignal_player_id = excluded.onesignal_player_id
   `).run(token.trim(), req.auth.userId, req.auth.storeId, platform || null, nowIso(), onesignalPlayerId);
+
+  // A fresh reinstall typically produces a brand-new raw APNs token, which
+  // otherwise just accumulates as a SEPARATE row here alongside old ones
+  // from previous installs — meaning a send later hands OneSignal a mixed
+  // list of the current valid token plus every dead one from past installs
+  // in the same request. Clean out anything else for this person, keeping
+  // only the token that was just confirmed.
+  const staleRemoved = db.prepare('DELETE FROM push_tokens WHERE user_id = ? AND token != ?').run(req.auth.userId, token.trim());
+  if (staleRemoved.changes > 0) console.log(`[push] removed ${staleRemoved.changes} stale token(s) for user=${req.auth.userId}`);
+
   res.status(201).json({ registered: true, oneSignalConnected: !!onesignalPlayerId });
 });
 
