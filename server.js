@@ -2662,12 +2662,23 @@ async function sendPushToUser(userId, title, body, { badge, data, type } = {}) {
       return { sent: false, reason: `push API error: ${response.status} ${errBody}` };
     }
     const resultBody = await response.json().catch(() => null);
-    if (resultBody && resultBody.recipients === 0) {
-      console.log(`${logPrefix} NOT SENT: OneSignal accepted but reached 0 recipients ${resultBody.errors ? JSON.stringify(resultBody.errors) : ''}`);
-      return { sent: false, reason: `OneSignal accepted the request but reached 0 recipients${resultBody.errors ? ': ' + JSON.stringify(resultBody.errors) : ''}` };
+    console.log(`${logPrefix} raw OneSignal response: ${JSON.stringify(resultBody)}`); // TEMPORARY — remove once delivery is confirmed reliable
+    // A 2xx from OneSignal only means the REQUEST was well-formed — it does
+    // NOT mean the push actually reached a device. That only happened
+    // previously if `recipients` was explicitly the number 0; if the field
+    // was simply missing (which OneSignal does return in some cases,
+    // silently, alongside an `errors` array), this was wrongly reported as
+    // a successful send even though nothing was ever delivered.
+    if (resultBody && Array.isArray(resultBody.errors) && resultBody.errors.length > 0) {
+      console.log(`${logPrefix} NOT SENT: OneSignal returned errors: ${JSON.stringify(resultBody.errors)}`);
+      return { sent: false, reason: `OneSignal error: ${JSON.stringify(resultBody.errors)}` };
     }
-    console.log(`${logPrefix} SENT \u2014 recipients=${resultBody ? resultBody.recipients : 'unknown'}`);
-    return { sent: true, recipients: resultBody ? resultBody.recipients : undefined };
+    if (!resultBody || typeof resultBody.recipients !== 'number' || resultBody.recipients <= 0) {
+      console.log(`${logPrefix} NOT SENT: no confirmed recipients (recipients=${resultBody ? resultBody.recipients : 'no body'})`);
+      return { sent: false, reason: `OneSignal accepted the request but did not confirm any recipients (recipients=${resultBody ? resultBody.recipients : 'no body'})` };
+    }
+    console.log(`${logPrefix} SENT \u2014 recipients=${resultBody.recipients}`);
+    return { sent: true, recipients: resultBody.recipients };
   } catch (e) {
     console.log(`${logPrefix} NOT SENT: exception ${e.message}`);
     return { sent: false, reason: e.message };
