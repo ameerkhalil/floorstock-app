@@ -541,6 +541,11 @@
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>
           Support
         </button>
+        <button class="btn-ghost" id="purchaseListBtn" style="position:relative;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/></svg>
+          Need to purchase
+          <span id="purchaseListBadge" style="display:none; position:absolute; top:-6px; right:-6px; background:var(--amber); color:var(--ink); font-size:10px; font-weight:700; min-width:16px; height:16px; border-radius:8px; align-items:center; justify-content:center; padding:0 4px;"></span>
+        </button>
         <button class="btn-ghost" id="workersBtn" style="display:none;">
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
           Manage
@@ -1187,6 +1192,45 @@
         </p>
         <div id="notificationPrefsList" style="display:flex; flex-direction:column; gap:2px;"></div>
         <div class="auth-error" id="notificationPrefsError" style="display:none; margin-top:10px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- need to purchase list -->
+  <div class="modal-overlay" id="purchaseListOverlay">
+    <div class="modal">
+      <div class="modal-header">
+        <div class="modal-title">NEED TO PURCHASE</div>
+        <button class="modal-close" id="purchaseListCloseBtn">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
+        </button>
+      </div>
+      <div style="padding: 18px;">
+        <button type="button" class="scan-btn" id="purchaseScanBtn" style="width:100%; justify-content:center; padding:11px 0; margin-bottom:6px;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 7V5a2 2 0 0 1 2-2h2"/><path d="M17 3h2a2 2 0 0 1 2 2v2"/><path d="M21 17v2a2 2 0 0 1-2 2h-2"/><path d="M7 21H5a2 2 0 0 1-2-2v-2"/><line x1="7" y1="12" x2="17" y2="12"/></svg>
+          <span id="purchaseScanBtnLabel">Scan to add</span>
+        </button>
+        <p style="font-size:11.5px; color:var(--muted); text-align:center; margin:0 0 14px;">Keep scanning — each item adds to the list below without closing the camera.</p>
+
+        <div class="scan-wrap" id="purchaseScanWrap">
+          <video id="purchaseScanVideo" muted playsinline></video>
+          <div class="scan-guide-overlay">
+            <div class="scan-guide-box" id="purchaseScanGuideBox"></div>
+          </div>
+          <button type="button" class="torch-btn" id="purchaseTorchToggleBtn" title="Toggle flashlight">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18.5 2h-13L2 9.5 12 22 22 9.5 18.5 2z"/><path d="M12 2v20"/></svg>
+          </button>
+        </div>
+        <div class="scan-error" id="purchaseScanError" style="display:none;"></div>
+
+        <div style="display:flex; gap:8px; margin-top:14px;">
+          <input class="field-input" id="purchaseManualName" placeholder="No barcode? Type a name…" style="flex:1;">
+          <button type="button" id="purchaseManualAddBtn" style="background:var(--accent); color:#fff; border:none; border-radius:7px; padding:0 16px; font-weight:600; font-size:13px; flex-shrink:0;">Add</button>
+        </div>
+
+        <div class="section-label" style="margin-top:18px;">On the list</div>
+        <div id="purchaseListActive" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <div id="purchaseListEmpty" style="font-size:13px; color:var(--muted); display:none;">Nothing on the list right now.</div>
       </div>
     </div>
   </div>
@@ -2390,6 +2434,10 @@
     items.push({ id: 'connectPosBtn', label: 'Connect your POS', icon: '<rect x="2" y="4" width="20" height="16" rx="2"/><line x1="2" y1="10" x2="22" y2="10"/>' });
     items.push({ id: 'notificationSettingsBtn', label: 'Notifications', icon: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0"/>' });
     items.push({ id: 'supportLinkBtn', label: 'Support', icon: '<circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/>' });
+    const purchaseCount = purchaseRequests.filter(p => !p.fulfilled).length;
+    items.push(purchaseCount > 0
+      ? { id: 'purchaseListBtn', label: 'Need to purchase', icon: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>', badge: purchaseCount }
+      : { id: 'purchaseListBtn', label: 'Need to purchase', icon: '<path d="M6 2 3 6v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2V6l-3-4Z"/><path d="M3 6h18"/><path d="M16 10a4 4 0 0 1-8 0"/>' });
     if (document.getElementById('workersBtn').style.display === 'flex') {
       items.push({ id: 'workersBtn', label: 'Manage', icon: '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/>' });
     }
@@ -5154,6 +5202,303 @@
   document.getElementById('torchToggleBtn').addEventListener('click', toggleTorch);
 
   // =====================================================================
+  // NEED TO PURCHASE LIST (scan-to-add reorder list)
+  // =====================================================================
+  // A fully separate, self-contained scanner rather than reusing the New
+  // Tag form's — that one took many rounds of real-world debugging (touch
+  // handling, cropped decode, torch, benign-error filtering), and
+  // duplicating it here means this can never regress the original.
+  // Continuous scanning by design: unlike the New Tag scanner (which
+  // closes after one successful read), this keeps the camera open so
+  // someone can walk the aisles and scan several items in a row.
+
+  let purchaseRequests = [];
+  let purchaseScanning = false;
+  let purchaseZxingReader = null;
+  let purchaseScanMediaStream = null;
+  let purchaseScanVideoTrack = null;
+  let purchaseTorchOn = false;
+  let purchaseScanLoopHandle = null;
+  let purchaseScanCanvas = null;
+  let purchaseLastScannedUpc = null;
+  let purchaseLastScannedAt = 0;
+
+  async function loadPurchaseRequests() {
+    try {
+      purchaseRequests = await apiRequest('/api/purchase-requests');
+      renderPurchaseList();
+      updatePurchaseListBadge();
+    } catch (e) {
+      // Non-critical to the rest of the app loading — fail quietly.
+    }
+  }
+
+  function updatePurchaseListBadge() {
+    const count = purchaseRequests.filter(p => !p.fulfilled).length;
+    const badge = document.getElementById('purchaseListBadge');
+    badge.style.display = count > 0 ? 'flex' : 'none';
+    badge.textContent = count;
+  }
+
+  function renderPurchaseList() {
+    const active = purchaseRequests.filter(p => !p.fulfilled);
+    const listEl = document.getElementById('purchaseListActive');
+    const emptyEl = document.getElementById('purchaseListEmpty');
+    if (active.length === 0) {
+      listEl.innerHTML = '';
+      emptyEl.style.display = 'block';
+      return;
+    }
+    emptyEl.style.display = 'none';
+    listEl.innerHTML = active.map(p => `
+      <div style="display:flex; align-items:center; justify-content:space-between; background:var(--surface); border-radius:8px; padding:10px 12px; gap:10px;">
+        <div style="min-width:0;">
+          <div style="font-weight:600; font-size:13.5px;">${esc(p.name)}${p.quantity > 1 ? ` \u00d7${p.quantity}` : ''}</div>
+          <div style="color:var(--muted); font-size:11.5px; margin-top:2px;">${p.upc ? esc(p.upc) + ' \u00b7 ' : ''}${p.requestedBy ? esc(p.requestedBy) + ' \u00b7 ' : ''}${timeAgo(p.requestedAt)}</div>
+        </div>
+        <div style="display:flex; gap:6px; flex-shrink:0;">
+          <button type="button" class="worker-remove" style="background:var(--ok-tint); color:var(--ok-text);" data-fulfill-id="${p.id}" title="Mark purchased">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>
+          </button>
+          <button type="button" class="worker-remove" data-delete-purchase-id="${p.id}" title="Remove">
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+          </button>
+        </div>
+      </div>
+    `).join('');
+
+    listEl.querySelectorAll('[data-fulfill-id]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        try {
+          await apiRequest(`/api/purchase-requests/${btn.dataset.fulfillId}/fulfill`, { method: 'PUT' });
+          showToast('Marked purchased');
+          loadPurchaseRequests();
+        } catch (e) { showToast(e.message); }
+      });
+    });
+    listEl.querySelectorAll('[data-delete-purchase-id]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Remove this from the list?')) return;
+        try {
+          await apiRequest(`/api/purchase-requests/${btn.dataset.deletePurchaseId}`, { method: 'DELETE' });
+          showToast('Removed');
+          loadPurchaseRequests();
+        } catch (e) { showToast(e.message); }
+      });
+    });
+  }
+
+  function openPurchaseListModal() {
+    document.getElementById('purchaseListOverlay').classList.add('open');
+    loadPurchaseRequests();
+  }
+  document.getElementById('purchaseListBtn').addEventListener('click', openPurchaseListModal);
+  document.getElementById('purchaseListCloseBtn').addEventListener('click', () => {
+    stopPurchaseScan();
+    document.getElementById('purchaseListOverlay').classList.remove('open');
+  });
+  document.getElementById('purchaseListOverlay').addEventListener('click', (e) => {
+    if (e.target.id === 'purchaseListOverlay') {
+      stopPurchaseScan();
+      document.getElementById('purchaseListOverlay').classList.remove('open');
+    }
+  });
+
+  function stopPurchaseScan() {
+    purchaseScanning = false;
+    if (purchaseScanLoopHandle) { cancelAnimationFrame(purchaseScanLoopHandle); purchaseScanLoopHandle = null; }
+    if (purchaseZxingReader) { try { purchaseZxingReader.reset(); } catch (e) {} }
+    const video = document.getElementById('purchaseScanVideo');
+    document.getElementById('purchaseScanWrap').classList.remove('on');
+    if (purchaseScanMediaStream) {
+      purchaseScanMediaStream.getTracks().forEach(t => t.stop());
+      purchaseScanMediaStream = null;
+    }
+    video.srcObject = null;
+    purchaseScanVideoTrack = null;
+    purchaseTorchOn = false;
+    purchaseLastScannedUpc = null;
+    document.getElementById('purchaseTorchToggleBtn').classList.remove('show', 'active');
+    document.getElementById('purchaseScanGuideBox').classList.remove('found');
+    document.getElementById('purchaseScanBtn').classList.remove('active');
+    document.getElementById('purchaseScanBtnLabel').textContent = 'Scan to add';
+  }
+
+  async function togglePurchaseTorch() {
+    if (!purchaseScanVideoTrack) return;
+    purchaseTorchOn = !purchaseTorchOn;
+    try {
+      await purchaseScanVideoTrack.applyConstraints({ advanced: [{ torch: purchaseTorchOn }] });
+      document.getElementById('purchaseTorchToggleBtn').classList.toggle('active', purchaseTorchOn);
+    } catch (e) {
+      purchaseTorchOn = !purchaseTorchOn;
+    }
+  }
+
+  async function addScannedUpcToPurchaseList(upc) {
+    let name = upc;
+    try {
+      const result = await apiRequest(`/api/upc-lookup/${encodeURIComponent(upc)}`);
+      if (result.found && result.name) name = result.name;
+    } catch (e) { /* fall back to showing the raw UPC as the name */ }
+    try {
+      const created = await apiRequest('/api/purchase-requests', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ upc, name, quantity: 1 }),
+      });
+      purchaseRequests.unshift(created);
+      renderPurchaseList();
+      updatePurchaseListBadge();
+      showToast(`Added ${name}`);
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t add that item');
+    }
+  }
+
+  function runPurchaseScanLoop() {
+    const video = document.getElementById('purchaseScanVideo');
+    const guideBox = document.getElementById('purchaseScanGuideBox');
+    if (!purchaseScanning || !video.videoWidth) {
+      purchaseScanLoopHandle = requestAnimationFrame(runPurchaseScanLoop);
+      return;
+    }
+    if (!purchaseScanCanvas) purchaseScanCanvas = document.createElement('canvas');
+
+    const boxWidthFrac = 0.78, boxHeightFrac = 0.34;
+    const cropW = Math.round(video.videoWidth * boxWidthFrac);
+    const cropH = Math.round(video.videoHeight * boxHeightFrac);
+    const cropX = Math.round((video.videoWidth - cropW) / 2);
+    const cropY = Math.round((video.videoHeight - cropH) / 2);
+
+    purchaseScanCanvas.width = cropW;
+    purchaseScanCanvas.height = cropH;
+    const ctx = purchaseScanCanvas.getContext('2d', { willReadFrequently: true });
+    ctx.drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropW, cropH);
+
+    try {
+      const result = purchaseZxingReader.decodeFromCanvas(purchaseScanCanvas);
+      if (result && purchaseScanning) {
+        const isUpcE = typeof result.getBarcodeFormat === 'function' && result.getBarcodeFormat() === ZXing.BarcodeFormat.UPC_E;
+        const upc = normalizeScannedUpc(result.getText(), isUpcE);
+
+        // Dedup: the same barcode staying in frame for a moment shouldn't
+        // spam the list with duplicate entries — require either a
+        // different UPC or a few seconds to pass before adding it again.
+        const now = Date.now();
+        const isDuplicate = upc === purchaseLastScannedUpc && (now - purchaseLastScannedAt) < 3000;
+        if (!isDuplicate) {
+          guideBox.classList.add('found');
+          document.getElementById('purchaseScanError').style.display = 'none';
+          hapticSuccess();
+          purchaseLastScannedUpc = upc;
+          purchaseLastScannedAt = now;
+          addScannedUpcToPurchaseList(upc);
+          setTimeout(() => guideBox.classList.remove('found'), 500);
+        }
+      }
+    } catch (e) {
+      if (!isBenignScanError(e)) {
+        const errEl = document.getElementById('purchaseScanError');
+        errEl.textContent = 'Scanner error \u2014 ' + (e && e.message ? e.message : 'try again.');
+        errEl.style.display = 'block';
+      }
+    }
+
+    if (purchaseScanning) purchaseScanLoopHandle = requestAnimationFrame(runPurchaseScanLoop);
+  }
+
+  async function startPurchaseScan() {
+    const errEl = document.getElementById('purchaseScanError');
+    errEl.style.display = 'none';
+
+    if (typeof ZXing === 'undefined' || typeof ZXingBrowser === 'undefined') {
+      errEl.textContent = 'Scanner failed to load \u2014 check your connection.';
+      errEl.style.display = 'block';
+      return;
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      errEl.textContent = 'This browser doesn\u2019t support camera access.';
+      errEl.style.display = 'block';
+      return;
+    }
+
+    const video = document.getElementById('purchaseScanVideo');
+    document.getElementById('purchaseScanWrap').classList.add('on');
+    purchaseScanning = true;
+    document.getElementById('purchaseScanBtn').classList.add('active');
+    document.getElementById('purchaseScanBtnLabel').textContent = 'Stop scanning';
+
+    const hints = new Map();
+    hints.set(ZXing.DecodeHintType.POSSIBLE_FORMATS, [
+      ZXing.BarcodeFormat.UPC_A, ZXing.BarcodeFormat.UPC_E,
+      ZXing.BarcodeFormat.EAN_13, ZXing.BarcodeFormat.EAN_8,
+      ZXing.BarcodeFormat.CODE_128, ZXing.BarcodeFormat.CODE_39,
+      ZXing.BarcodeFormat.CODE_93, ZXing.BarcodeFormat.ITF,
+      ZXing.BarcodeFormat.CODABAR,
+    ]);
+    hints.set(ZXing.DecodeHintType.TRY_HARDER, true);
+    purchaseZxingReader = new ZXingBrowser.BrowserMultiFormatReader(hints);
+
+    const constraints = {
+      video: {
+        facingMode: { ideal: 'environment' },
+        width: { ideal: 1920 },
+        height: { ideal: 1080 },
+      }
+    };
+
+    try {
+      purchaseScanMediaStream = await navigator.mediaDevices.getUserMedia(constraints);
+      video.srcObject = purchaseScanMediaStream;
+      await video.play();
+
+      purchaseScanVideoTrack = purchaseScanMediaStream.getVideoTracks()[0];
+      const caps = purchaseScanVideoTrack.getCapabilities ? purchaseScanVideoTrack.getCapabilities() : {};
+      if (caps && caps.torch) {
+        document.getElementById('purchaseTorchToggleBtn').classList.add('show');
+      }
+
+      purchaseScanLoopHandle = requestAnimationFrame(runPurchaseScanLoop);
+    } catch (e) {
+      let msg = 'Camera access was blocked or unavailable.';
+      if (e && e.name === 'NotAllowedError') {
+        msg = 'Camera permission was denied. On iPhone: Settings \u2192 Safari \u2192 Camera \u2192 Allow, or tap the \u201cAa\u201d icon in the address bar \u2192 Website Settings \u2192 Camera \u2192 Allow, then try again.';
+      } else if (e && e.name === 'NotFoundError') {
+        msg = 'No camera found on this device.';
+      }
+      errEl.textContent = msg;
+      errEl.style.display = 'block';
+      stopPurchaseScan();
+    }
+  }
+
+  document.getElementById('purchaseScanBtn').addEventListener('click', () => { purchaseScanning ? stopPurchaseScan() : startPurchaseScan(); });
+  document.getElementById('purchaseTorchToggleBtn').addEventListener('click', togglePurchaseTorch);
+
+  async function addManualPurchaseRequest() {
+    const input = document.getElementById('purchaseManualName');
+    const name = input.value.trim();
+    if (!name) return;
+    try {
+      const created = await apiRequest('/api/purchase-requests', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name, quantity: 1 }),
+      });
+      purchaseRequests.unshift(created);
+      renderPurchaseList();
+      updatePurchaseListBadge();
+      input.value = '';
+      showToast(`Added ${name}`);
+    } catch (e) {
+      showToast(e.message || 'Couldn\u2019t add that item');
+    }
+  }
+  document.getElementById('purchaseManualAddBtn').addEventListener('click', addManualPurchaseRequest);
+  document.getElementById('purchaseManualName').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') addManualPurchaseRequest();
+  });
+
+  // =====================================================================
   // PENDING ITEMS (bulk scan queue — never counted in inventory totals
   // until completed with an expiration date, quantity, and location)
   // =====================================================================
@@ -5410,6 +5755,7 @@
     await Promise.all([loadItems(), loadCategories()]);
     renderAll();
     loadShiftNotes();
+    loadPurchaseRequests();
   }
 
   // ---------- haptic feedback ----------

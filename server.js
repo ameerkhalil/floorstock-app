@@ -179,6 +179,22 @@ db.exec(`
     resolved_at TEXT
   );
 
+  -- Scanned (or manually added) products that need to be reordered. Shared
+  -- across the whole store, same spirit as shift notes — anyone can add or
+  -- fulfill an item, not just managers.
+  CREATE TABLE IF NOT EXISTS purchase_requests (
+    id TEXT PRIMARY KEY,
+    store_id TEXT NOT NULL,
+    upc TEXT,
+    name TEXT,
+    quantity INTEGER NOT NULL DEFAULT 1,
+    requested_by TEXT,
+    requested_at TEXT NOT NULL,
+    fulfilled INTEGER NOT NULL DEFAULT 0,
+    fulfilled_by TEXT,
+    fulfilled_at TEXT
+  );
+
   -- One row per device that has granted push permission. A person can be
   -- signed in on more than one device (phone + a shared tablet up front),
   -- so this is keyed by token, not by user.
@@ -999,6 +1015,57 @@ app.delete('/api/shift-notes/:id', requireAuth, requireActiveSubscription, (req,
   const existing = db.prepare('SELECT * FROM shift_notes WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
   if (!existing) return res.status(404).json({ error: 'Note not found.' });
   db.prepare('DELETE FROM shift_notes WHERE id = ?').run(req.params.id);
+  res.status(204).end();
+});
+
+// =====================================================================
+// PURCHASE REQUESTS ("need to purchase" list, filled by scanning)
+// =====================================================================
+
+function rowToPurchaseRequest(row) {
+  return {
+    id: row.id,
+    upc: row.upc || null,
+    name: row.name || null,
+    quantity: row.quantity,
+    requestedBy: row.requested_by || null,
+    requestedAt: row.requested_at,
+    fulfilled: !!row.fulfilled,
+    fulfilledBy: row.fulfilled_by || null,
+    fulfilledAt: row.fulfilled_at || null,
+  };
+}
+
+app.get('/api/purchase-requests', requireAuth, requireActiveSubscription, (req, res) => {
+  const rows = db.prepare('SELECT * FROM purchase_requests WHERE store_id = ? ORDER BY fulfilled ASC, requested_at DESC').all(req.auth.storeId);
+  res.json(rows.map(rowToPurchaseRequest));
+});
+
+app.post('/api/purchase-requests', requireAuth, requireActiveSubscription, (req, res) => {
+  const { upc, name, quantity } = req.body || {};
+  if (!name || !String(name).trim()) return res.status(400).json({ error: 'A product name is required.' });
+  const qty = Number(quantity);
+  const id = newId();
+  db.prepare(`
+    INSERT INTO purchase_requests (id, store_id, upc, name, quantity, requested_by, requested_at, fulfilled)
+    VALUES (?, ?, ?, ?, ?, ?, ?, 0)
+  `).run(id, req.auth.storeId, upc ? String(upc).trim() : null, String(name).trim(), Number.isFinite(qty) && qty > 0 ? qty : 1, currentUsername(req), nowIso());
+  res.status(201).json(rowToPurchaseRequest(db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(id)));
+});
+
+app.put('/api/purchase-requests/:id/fulfill', requireAuth, requireActiveSubscription, (req, res) => {
+  const existing = db.prepare('SELECT * FROM purchase_requests WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!existing) return res.status(404).json({ error: 'Not found.' });
+  const nowFulfilled = existing.fulfilled ? 0 : 1;
+  db.prepare('UPDATE purchase_requests SET fulfilled = ?, fulfilled_by = ?, fulfilled_at = ? WHERE id = ?')
+    .run(nowFulfilled, nowFulfilled ? currentUsername(req) : null, nowFulfilled ? nowIso() : null, req.params.id);
+  res.json(rowToPurchaseRequest(db.prepare('SELECT * FROM purchase_requests WHERE id = ?').get(req.params.id)));
+});
+
+app.delete('/api/purchase-requests/:id', requireAuth, requireActiveSubscription, (req, res) => {
+  const existing = db.prepare('SELECT * FROM purchase_requests WHERE id = ? AND store_id = ?').get(req.params.id, req.auth.storeId);
+  if (!existing) return res.status(404).json({ error: 'Not found.' });
+  db.prepare('DELETE FROM purchase_requests WHERE id = ?').run(req.params.id);
   res.status(204).end();
 });
 
