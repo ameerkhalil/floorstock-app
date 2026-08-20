@@ -338,6 +338,10 @@ const notifyPrefColumns = ['notify_task_assigned', 'notify_task_overdue', 'notif
 for (const col of notifyPrefColumns) {
   if (!userNotifyCols.includes(col)) db.exec(`ALTER TABLE users ADD COLUMN ${col} INTEGER NOT NULL DEFAULT 1`);
 }
+// Defaults OFF — most people have their own personal phone, where this
+// would do nothing useful. Someone on a shared store device turns it on
+// so the device stops being "claimed" by whoever logged in last.
+if (!userNotifyCols.includes('clear_push_on_logout')) db.exec("ALTER TABLE users ADD COLUMN clear_push_on_logout INTEGER NOT NULL DEFAULT 0");
 
 const salesCols = db.prepare("PRAGMA table_info(sales)").all().map(c => c.name);
 if (!salesCols.includes('vendor')) db.exec("ALTER TABLE sales ADD COLUMN vendor TEXT");
@@ -2607,19 +2611,35 @@ const NOTIFY_TYPE_COLUMN = {
 };
 
 async function sendPushToUser(userId, title, body, { badge, data, type } = {}) {
-  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return { sent: false, reason: 'not configured' };
+  // TEMPORARY logging — visible in Render's Logs tab — to trace exactly
+  // what happens on every push attempt, since this function is called
+  // fire-and-forget everywhere (.catch(() => {})), meaning failures here
+  // were previously completely invisible with no trace anywhere. Safe to
+  // remove once scheduled pushes are confirmed reaching devices reliably.
+  const logPrefix = `[push] user=${userId} title="${title}"`;
+
+  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
+    console.log(`${logPrefix} NOT SENT: OneSignal not configured`);
+    return { sent: false, reason: 'not configured' };
+  }
 
   if (type) {
     const col = NOTIFY_TYPE_COLUMN[type];
     if (col) {
       const user = db.prepare(`SELECT ${col} as pref FROM users WHERE id = ?`).get(userId);
-      if (user && user.pref === 0) return { sent: false, reason: `person has "${type}" notifications turned off` };
+      if (user && user.pref === 0) {
+        console.log(`${logPrefix} NOT SENT: person has "${type}" notifications turned off`);
+        return { sent: false, reason: `person has "${type}" notifications turned off` };
+      }
     }
   }
 
   const playerIds = db.prepare('SELECT onesignal_player_id FROM push_tokens WHERE user_id = ? AND onesignal_player_id IS NOT NULL')
     .all(userId).map(r => r.onesignal_player_id);
-  if (playerIds.length === 0) return { sent: false, reason: 'no registered devices' };
+  if (playerIds.length === 0) {
+    console.log(`${logPrefix} NOT SENT: no registered devices for this user`);
+    return { sent: false, reason: 'no registered devices' };
+  }
 
   try {
     const payload = {
@@ -2638,14 +2658,18 @@ async function sendPushToUser(userId, title, body, { badge, data, type } = {}) {
     });
     if (!response.ok) {
       const errBody = await response.text().catch(() => '');
+      console.log(`${logPrefix} NOT SENT: push API error ${response.status} ${errBody}`);
       return { sent: false, reason: `push API error: ${response.status} ${errBody}` };
     }
     const resultBody = await response.json().catch(() => null);
     if (resultBody && resultBody.recipients === 0) {
+      console.log(`${logPrefix} NOT SENT: OneSignal accepted but reached 0 recipients ${resultBody.errors ? JSON.stringify(resultBody.errors) : ''}`);
       return { sent: false, reason: `OneSignal accepted the request but reached 0 recipients${resultBody.errors ? ': ' + JSON.stringify(resultBody.errors) : ''}` };
     }
+    console.log(`${logPrefix} SENT \u2014 recipients=${resultBody ? resultBody.recipients : 'unknown'}`);
     return { sent: true, recipients: resultBody ? resultBody.recipients : undefined };
   } catch (e) {
+    console.log(`${logPrefix} NOT SENT: exception ${e.message}`);
     return { sent: false, reason: e.message };
   }
 }
@@ -2710,7 +2734,7 @@ app.post('/api/push/unregister', requireAuth, (req, res) => {
 
 app.get('/api/notification-preferences', requireAuth, (req, res) => {
   const user = db.prepare(`
-    SELECT notify_task_assigned, notify_task_overdue, notify_expired_items, notify_rescue_items, notify_trial_ending
+    SELECT notify_task_assigned, notify_task_overdue, notify_expired_items, notify_rescue_items, notify_trial_ending, clear_push_on_logout
     FROM users WHERE id = ?
   `).get(req.auth.userId);
   if (!user) return res.status(404).json({ error: 'User not found.' });
@@ -2720,6 +2744,7 @@ app.get('/api/notification-preferences', requireAuth, (req, res) => {
     expiredItems: !!user.notify_expired_items,
     rescueItems: !!user.notify_rescue_items,
     trialEnding: !!user.notify_trial_ending,
+    clearPushOnLogout: !!user.clear_push_on_logout,
   });
 });
 
@@ -2732,6 +2757,10 @@ app.put('/api/notification-preferences', requireAuth, (req, res) => {
       updates.push(`${col} = ?`);
       values.push(body[key] ? 1 : 0);
     }
+  }
+  if ('clearPushOnLogout' in body) {
+    updates.push('clear_push_on_logout = ?');
+    values.push(body.clearPushOnLogout ? 1 : 0);
   }
   if (updates.length === 0) return res.status(400).json({ error: 'Nothing to update.' });
   values.push(req.auth.userId);
@@ -2850,8 +2879,11 @@ function runOverdueTaskPushCheck() {
   const overdue = db.prepare(`
     SELECT * FROM tasks WHERE status = 'open' AND due_at IS NOT NULL AND due_at < ?
   `).all(nowIsoStr.slice(0, 19));
+  console.log(`[push] runOverdueTaskPushCheck found ${overdue.length} overdue task(s)`);
   for (const task of overdue) {
-    if (pushAlreadySentToday(`overdue-task:${task.id}`)) continue;
+    const alreadySent = pushAlreadySentToday(`overdue-task:${task.id}`);
+    console.log(`[push] task=${task.id} "${task.title}" assignedTo=${task.assigned_to} alreadySentToday=${alreadySent}`);
+    if (alreadySent) continue;
     sendPushToUser(task.assigned_to, 'Task overdue', task.title, { type: 'taskOverdue' }).catch(() => {});
   }
 }
@@ -2863,16 +2895,22 @@ setInterval(runOverdueTaskPushCheck, 60 * 60 * 1000); // hourly check
 // the digest email so managers get one predictable daily check-in.
 function runDailyOpsPushCheck() {
   if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return;
-  const nowUtc = new Date();
-  if (nowUtc.getUTCHours() !== DIGEST_HOUR_UTC) return;
+  // No longer gated to one specific UTC hour — that gate was redundant
+  // (each alert type below already has its own same-day dedup keyed per
+  // store) and it was silently preventing this whole function from doing
+  // anything unless a deploy or the hourly interval happened to land
+  // during that exact hour. Running it every hour and letting the
+  // per-store dedup do its job is both simpler and actually reliable.
+  console.log('[push] runDailyOpsPushCheck starting');
 
   const today = todayUtcDateStr();
   const yesterday = new Date(Date.now() - 86400000).toISOString().slice(0, 10);
 
   const stores = db.prepare('SELECT * FROM stores').all();
+  console.log(`[push] runDailyOpsPushCheck checking ${stores.length} store(s)`);
   for (const store of stores) {
     const manager = db.prepare("SELECT * FROM users WHERE organization_id = ? AND role = 'manager' LIMIT 1").get(store.organization_id);
-    if (!manager) continue;
+    if (!manager) { console.log(`[push] store=${store.id} has no manager \u2014 skipping`); continue; }
 
     const org = db.prepare('SELECT critical_days, soon_days, trial_ends_at, subscription_status FROM organizations WHERE id = ?').get(store.organization_id);
     const criticalDays = org ? org.critical_days : 3;
@@ -2883,7 +2921,9 @@ function runDailyOpsPushCheck() {
     // they crossed into "expired" overnight rather than having been expired
     // for a while already (which would otherwise re-notify every single day).
     const newlyExpired = allItems.filter(it => it.expiration_date === yesterday);
-    if (newlyExpired.length > 0 && !pushAlreadySentToday(`expired:${store.id}`)) {
+    const expiredAlreadySent = pushAlreadySentToday(`expired:${store.id}`); // has a side effect (marks as sent) — call exactly once
+    console.log(`[push] store=${store.id} newlyExpired=${newlyExpired.length} alreadySentToday=${expiredAlreadySent}`);
+    if (newlyExpired.length > 0 && !expiredAlreadySent) {
       sendPushToUser(manager.id, `${newlyExpired.length} item${newlyExpired.length !== 1 ? 's' : ''} expired overnight`,
         newlyExpired.slice(0, 3).map(it => it.name).join(', ') + (newlyExpired.length > 3 ? ', \u2026' : ''),
         { data: { screen: 'home' }, type: 'expiredItems' }).catch(() => {});
@@ -2896,7 +2936,9 @@ function runDailyOpsPushCheck() {
       const u = urgencyOf(it.expiration_date, criticalDays, soonDays);
       return u === 'critical' || u === 'soon';
     });
-    if (rescueCandidates.length > 0 && !pushAlreadySentToday(`rescue:${store.id}`)) {
+    const rescueAlreadySent = pushAlreadySentToday(`rescue:${store.id}`); // has a side effect — call exactly once
+    console.log(`[push] store=${store.id} rescueCandidates=${rescueCandidates.length} alreadySentToday=${rescueAlreadySent}`);
+    if (rescueCandidates.length > 0 && !rescueAlreadySent) {
       sendPushToUser(manager.id, `${rescueCandidates.length} item${rescueCandidates.length !== 1 ? 's' : ''} worth marking down`,
         'Still sellable if discounted soon \u2014 check Inventory Rescue.',
         { data: { screen: 'home' }, type: 'rescueItems' }).catch(() => {});
@@ -2905,11 +2947,19 @@ function runDailyOpsPushCheck() {
     // Trial ending soon.
     if (org && org.trial_ends_at && org.subscription_status === 'trialing') {
       const daysLeft = Math.ceil((new Date(org.trial_ends_at).getTime() - Date.now()) / 86400000);
-      if (daysLeft >= 0 && daysLeft <= 3 && !pushAlreadySentToday(`trial:${store.organization_id}`)) {
+      const inWindow = daysLeft >= 0 && daysLeft <= 3;
+      // Only check (and thus only mark-as-sent) when actually in the
+      // 0\u20133 day window \u2014 calling this outside the window would
+      // needlessly burn today's dedup slot for no reason.
+      const trialAlreadySent = inWindow ? pushAlreadySentToday(`trial:${store.organization_id}`) : null;
+      console.log(`[push] store=${store.id} trial daysLeft=${daysLeft} status=${org.subscription_status} inWindow=${inWindow} alreadySentToday=${trialAlreadySent}`);
+      if (inWindow && !trialAlreadySent) {
         sendPushToUser(manager.id, daysLeft === 0 ? 'Trial ends today' : `Trial ends in ${daysLeft} day${daysLeft !== 1 ? 's' : ''}`,
           'Add billing to keep FloorStock running without interruption.',
           { data: { screen: 'billing' }, type: 'trialEnding' }).catch(() => {});
       }
+    } else if (org) {
+      console.log(`[push] store=${store.id} trial check skipped: trial_ends_at=${org.trial_ends_at} status=${org.subscription_status}`);
     }
   }
 }

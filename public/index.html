@@ -1862,6 +1862,24 @@
   });
 
   async function performLogout(reason) {
+    // On a shared device, someone may have opted to have their push
+    // registration cleared on logout (Notification Settings) so the next
+    // person to sign in doesn't inherit their notifications. This has to
+    // happen BEFORE the session itself is destroyed, since unregistering
+    // still needs to know which account's token to remove.
+    try {
+      const storedToken = localStorage.getItem('floorstock_push_token');
+      if (storedToken) {
+        const prefs = await apiRequest('/api/notification-preferences');
+        if (prefs.clearPushOnLogout) {
+          await apiRequest('/api/push/unregister', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ token: storedToken }),
+          });
+        }
+      }
+    } catch (e) { /* never let this block the actual logout */ }
+
     try { await apiRequest('/api/auth/logout', { method: 'POST' }); } catch (e) {}
     currentUser = null;
     items = [];
@@ -4353,6 +4371,7 @@
     { key: 'rescueItems', label: 'Inventory rescue candidates', description: 'Manager only \u2014 items still worth marking down before they\u2019re a total loss.' },
     { key: 'trialEnding', label: 'Trial ending soon', description: 'Manager only \u2014 a heads-up in the last few days of your trial.' },
   ];
+  const SHARED_DEVICE_PREF_META = { key: 'clearPushOnLogout', label: 'Sharing this phone with coworkers?', description: 'When you sign out, stop this device from receiving your notifications \u2014 so they don\u2019t keep going to whoever used it last.' };
 
   async function openNotificationSettings() {
     document.getElementById('notificationPrefsError').style.display = 'none';
@@ -4367,7 +4386,7 @@
 
   function renderNotificationPrefs(prefs) {
     const listEl = document.getElementById('notificationPrefsList');
-    listEl.innerHTML = NOTIFICATION_PREF_META.map(meta => `
+    const rowHtml = (meta) => `
       <label style="display:flex; align-items:flex-start; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--card-border); cursor:pointer;">
         <span>
           <span style="display:block; font-weight:600; font-size:13.5px;">${esc(meta.label)}</span>
@@ -4375,7 +4394,10 @@
         </span>
         <input type="checkbox" data-pref-key="${meta.key}" ${prefs[meta.key] ? 'checked' : ''} style="width:20px; height:20px; margin:2px 0 0; flex-shrink:0;">
       </label>
-    `).join('');
+    `;
+    listEl.innerHTML = NOTIFICATION_PREF_META.map(rowHtml).join('')
+      + '<div style="font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:0.4px; margin:16px 0 2px;">Shared device</div>'
+      + rowHtml(SHARED_DEVICE_PREF_META);
 
     listEl.querySelectorAll('[data-pref-key]').forEach(input => {
       input.addEventListener('change', async () => {
@@ -5797,6 +5819,10 @@
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: token.value, platform: 'ios' }),
           });
+          // Kept locally so a logout on a shared device can unregister the
+          // right token — see performLogout() and the "clear push on
+          // logout" preference in Notification Settings.
+          localStorage.setItem('floorstock_push_token', token.value);
         } catch (e) { /* will just retry silently next time the app opens */ }
       });
 
