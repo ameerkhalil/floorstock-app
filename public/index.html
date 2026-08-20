@@ -5838,11 +5838,20 @@
       PushNotifications.addListener('registration', async (token) => {
         pushDiagLog('got token, len=' + (token && token.value ? token.value.length : 'none')); // TEMPORARY
         try {
-          await apiRequest('/api/push/register', {
+          const result = await apiRequest('/api/push/register', {
             method: 'POST', headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ token: token.value, platform: 'ios' }),
           });
-          pushDiagLog('/api/push/register succeeded'); // TEMPORARY
+          // The POST succeeding only means the server accepted the request
+          // — it does NOT mean OneSignal actually linked the device. Check
+          // that explicitly, since a device can silently end up with no
+          // real player id (and thus never receive a push) while this
+          // request still returns 201.
+          if (result && result.oneSignalConnected) {
+            pushDiagLog('/api/push/register succeeded, OneSignal linked'); // TEMPORARY
+          } else {
+            pushDiagLog('/api/push/register returned OK but OneSignal did NOT link \u2014 check server logs'); // TEMPORARY
+          }
           // Kept locally so a logout on a shared device can unregister the
           // right token — see performLogout() and the "clear push on
           // logout" preference in Notification Settings.

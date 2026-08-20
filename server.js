@@ -2701,7 +2701,10 @@ function markPushSentToday(dedupKey) {
 // Capacitor's push-notifications plugin, which is what actually talks to
 // Apple and gets the raw token in the first place.
 async function registerDeviceWithOneSignal(rawToken) {
-  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) return null;
+  if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
+    console.log('[push] registerDeviceWithOneSignal: OneSignal not configured');
+    return null;
+  }
   try {
     const response = await fetch('https://onesignal.com/api/v1/players', {
       method: 'POST',
@@ -2712,10 +2715,24 @@ async function registerDeviceWithOneSignal(rawToken) {
         identifier: rawToken,
       }),
     });
-    if (!response.ok) return null;
-    const body = await response.json();
-    return body && body.id ? body.id : null;
+    const bodyText = await response.text();
+    if (!response.ok) {
+      console.log(`[push] registerDeviceWithOneSignal FAILED: ${response.status} ${bodyText}`);
+      return null;
+    }
+    let body;
+    try { body = JSON.parse(bodyText); } catch (e) {
+      console.log(`[push] registerDeviceWithOneSignal: response wasn't valid JSON: ${bodyText}`);
+      return null;
+    }
+    if (!body || !body.id) {
+      console.log(`[push] registerDeviceWithOneSignal: OneSignal accepted the request but returned no player id: ${bodyText}`);
+      return null;
+    }
+    console.log(`[push] registerDeviceWithOneSignal succeeded, playerId=${body.id}`);
+    return body.id;
   } catch (e) {
+    console.log(`[push] registerDeviceWithOneSignal EXCEPTION: ${e.message}`);
     return null;
   }
 }
@@ -2725,6 +2742,7 @@ app.post('/api/push/register', requireAuth, async (req, res) => {
   if (!token || !String(token).trim()) return res.status(400).json({ error: 'A device token is required.' });
 
   const onesignalPlayerId = await registerDeviceWithOneSignal(token.trim());
+  console.log(`[push] /api/push/register user=${req.auth.userId} onesignalPlayerId=${onesignalPlayerId || 'NULL \u2014 device will NOT receive pushes'}`);
 
   db.prepare(`
     INSERT INTO push_tokens (token, user_id, store_id, platform, created_at, onesignal_player_id) VALUES (?, ?, ?, ?, ?, ?)
