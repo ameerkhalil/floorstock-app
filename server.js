@@ -2664,20 +2664,21 @@ async function sendPushToUser(userId, title, body, { badge, data, type } = {}) {
     const resultBody = await response.json().catch(() => null);
     console.log(`${logPrefix} raw OneSignal response: ${JSON.stringify(resultBody)}`); // TEMPORARY — remove once delivery is confirmed reliable
     // A 2xx from OneSignal only means the REQUEST was well-formed — it does
-    // NOT mean the push actually reached a device. That only happened
-    // previously if `recipients` was explicitly the number 0; if the field
-    // was simply missing (which OneSignal does return in some cases,
-    // silently, alongside an `errors` array), this was wrongly reported as
-    // a successful send even though nothing was ever delivered.
+    // NOT mean the push actually reached a device. The reliable signal
+    // turns out to be a genuine `id` with no `errors` array — OneSignal
+    // doesn't always include a `recipients` count in this immediate
+    // response when targeting specific player ids directly (as opposed to
+    // a broader segment/filter), even on a fully successful send, so
+    // requiring recipients > 0 here was rejecting real successes.
     if (resultBody && Array.isArray(resultBody.errors) && resultBody.errors.length > 0) {
       console.log(`${logPrefix} NOT SENT: OneSignal returned errors: ${JSON.stringify(resultBody.errors)}`);
       return { sent: false, reason: `OneSignal error: ${JSON.stringify(resultBody.errors)}` };
     }
-    if (!resultBody || typeof resultBody.recipients !== 'number' || resultBody.recipients <= 0) {
-      console.log(`${logPrefix} NOT SENT: no confirmed recipients (recipients=${resultBody ? resultBody.recipients : 'no body'})`);
-      return { sent: false, reason: `OneSignal accepted the request but did not confirm any recipients (recipients=${resultBody ? resultBody.recipients : 'no body'})` };
+    if (!resultBody || !resultBody.id) {
+      console.log(`${logPrefix} NOT SENT: no notification id in response (body=${JSON.stringify(resultBody)})`);
+      return { sent: false, reason: `OneSignal accepted the request but returned no notification id (body=${JSON.stringify(resultBody)})` };
     }
-    console.log(`${logPrefix} SENT \u2014 recipients=${resultBody.recipients}`);
+    console.log(`${logPrefix} SENT \u2014 id=${resultBody.id} recipients=${resultBody.recipients}`);
     return { sent: true, recipients: resultBody.recipients };
   } catch (e) {
     console.log(`${logPrefix} NOT SENT: exception ${e.message}`);
