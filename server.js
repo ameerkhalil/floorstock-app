@@ -2828,6 +2828,14 @@ function runDigestCheckIfDue() {
     if (willSend) sendDigestEmail(store, manager.email, alertItems).catch(() => {});
   }
 }
+// Called once immediately at startup (not just on the interval) — Render
+// restarts the server process on every deploy, which was resetting this
+// hourly timer back to a full hour away each time. On an actively-developed
+// app deployed many times a day, that could mean these checks effectively
+// never got a chance to run. All four have their own internal gating
+// (specific-hour checks and/or per-store, date-scoped dedup), so calling
+// them immediately is safe and won't cause duplicate sends.
+runDigestCheckIfDue();
 setInterval(runDigestCheckIfDue, 60 * 60 * 1000); // hourly check
 
 // ---------- scheduled push notifications ----------
@@ -2847,6 +2855,7 @@ function runOverdueTaskPushCheck() {
     sendPushToUser(task.assigned_to, 'Task overdue', task.title, { type: 'taskOverdue' }).catch(() => {});
   }
 }
+runOverdueTaskPushCheck();
 setInterval(runOverdueTaskPushCheck, 60 * 60 * 1000); // hourly check
 
 // Everything else (newly-expired items, inventory rescue candidates, trial
@@ -2904,6 +2913,7 @@ function runDailyOpsPushCheck() {
     }
   }
 }
+runDailyOpsPushCheck();
 setInterval(runDailyOpsPushCheck, 60 * 60 * 1000); // hourly check (gates internally to once/day)
 
 // =====================================================================
@@ -2957,6 +2967,7 @@ function runBackupCheckIfDue() {
     if (manager && manager.email) sendBackupEmail(store, manager.email).catch(() => {});
   }
 }
+runBackupCheckIfDue();
 setInterval(runBackupCheckIfDue, 60 * 60 * 1000); // hourly check
 
 app.get('/api/health', (req, res) => res.json({ ok: true }));
