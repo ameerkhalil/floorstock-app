@@ -2712,6 +2712,22 @@ function markPushSentToday(dedupKey) {
 // the app never needs OneSignal's own client SDK installed — only
 // Capacitor's push-notifications plugin, which is what actually talks to
 // Apple and gets the raw token in the first place.
+// OneSignal defaults every registered device to the PRODUCTION APNs
+// environment unless explicitly told otherwise \u2014 confirmed directly in
+// OneSignal's own docs: "OneSignal always defaults to the Production
+// Certificate when uploaded." Since this app is tested via Xcode's local
+// Run button (a genuine Sandbox/Development build, not TestFlight or an
+// App Store release), every device token registered so far has been
+// silently mismatched: OneSignal tries Production, Apple rejects it
+// because the token only exists in Sandbox, and OneSignal then marks the
+// device "Unsubscribed" \u2014 exactly what the dashboard showed. `test_type`
+// tells OneSignal which environment this specific token actually belongs
+// to. 1 = TestFlight, 2 = Xcode/Ad-Hoc development build (this app's
+// current situation). If this value turns out to be wrong, try 1 instead
+// \u2014 the two are easy to confuse and OneSignal's public docs don't clearly
+// spell out which is which for every case.
+const ONESIGNAL_TEST_TYPE_XCODE_DEBUG = 2;
+
 async function registerDeviceWithOneSignal(rawToken) {
   if (!ONESIGNAL_APP_ID || !ONESIGNAL_REST_API_KEY) {
     console.log('[push] registerDeviceWithOneSignal: OneSignal not configured');
@@ -2725,6 +2741,7 @@ async function registerDeviceWithOneSignal(rawToken) {
         app_id: ONESIGNAL_APP_ID,
         device_type: 0, // 0 = iOS (APNs)
         identifier: rawToken,
+        test_type: ONESIGNAL_TEST_TYPE_XCODE_DEBUG,
       }),
     });
     const bodyText = await response.text();
